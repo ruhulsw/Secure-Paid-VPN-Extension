@@ -424,6 +424,12 @@ body { min-height: 480px; }
   font-size: 11px;
   color: var(--text-muted);
 }
+.server-row--empty {
+  cursor: default;
+  color: var(--text-muted);
+  justify-content: center;
+}
+
 .server-row .badge {
   font-size: 10px;
   letter-spacing: 0.5px;

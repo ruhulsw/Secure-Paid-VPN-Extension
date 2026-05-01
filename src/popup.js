@@ -161,29 +161,59 @@
     els.footerUser.textContent = (state.user && state.user.email) || '';
   }
 
+  // DOM-construction (no innerHTML) — Mozilla's reviewers flag dynamic
+  // innerHTML even when inputs are escaped, because they can't audit the
+  // sanitizer. Building the tree node-by-node with textContent is the
+  // canonical fix.
+  function makeRow(s, isSelected, isConnected) {
+    var li = document.createElement('li');
+    li.className = 'server-row';
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    li.dataset.id = s.id;
+
+    var flag = document.createElement('span');
+    flag.className = 'flag';
+    flag.textContent = s.flag || flagEmoji(s.countryCode) || '🌐';
+
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    var name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.country || s.name || '';
+    var sub = document.createElement('div');
+    sub.className = 'sub';
+    var subText = [s.city, typeof s.pingMs === 'number' && s.pingMs > 0 ? s.pingMs + ' ms' : null]
+      .filter(Boolean).join(' · ');
+    sub.textContent = subText || s.host || '';
+    meta.appendChild(name);
+    meta.appendChild(sub);
+
+    li.appendChild(flag);
+    li.appendChild(meta);
+
+    if (isConnected || s.isPremium) {
+      var badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = isConnected ? 'Live' : 'Premium';
+      li.appendChild(badge);
+    }
+    return li;
+  }
+
   function renderServerList(servers, selectedId, conn) {
+    els.serverList.replaceChildren();
     if (!servers.length) {
-      els.serverList.innerHTML = '<li class="server-row" style="cursor:default;color:var(--text-muted);">No servers available yet.</li>';
+      var empty = document.createElement('li');
+      empty.className = 'server-row server-row--empty';
+      empty.textContent = 'No servers available yet.';
+      els.serverList.appendChild(empty);
       return;
     }
     var connectedId = conn && conn.status === 'connected' ? conn.serverId : null;
-    var html = servers.map(function (s) {
-      var flag = s.flag || flagEmoji(s.countryCode) || '🌐';
-      var sub = [s.city, typeof s.pingMs === 'number' && s.pingMs > 0 ? s.pingMs + ' ms' : null]
-        .filter(Boolean).join(' · ');
-      var isSelected = s.id === selectedId;
-      var isConnected = s.id === connectedId;
-      return ''
-        + '<li class="server-row" role="option" aria-selected="' + (isSelected ? 'true' : 'false') + '" data-id="' + escAttr(s.id) + '">'
-        + '  <span class="flag">' + escHtml(flag) + '</span>'
-        + '  <div class="meta">'
-        + '    <div class="name">' + escHtml(s.country || s.name || '') + '</div>'
-        + '    <div class="sub">' + escHtml(sub || s.host || '') + '</div>'
-        + '  </div>'
-        + (isConnected ? '<span class="badge">Live</span>' : (s.isPremium ? '<span class="badge">Premium</span>' : ''))
-        + '</li>';
-    }).join('');
-    els.serverList.innerHTML = html;
+    servers.forEach(function (s) {
+      els.serverList.appendChild(makeRow(s, s.id === selectedId, s.id === connectedId));
+    });
   }
 
   function flagEmoji(cc) {
@@ -193,12 +223,6 @@
     return String.fromCodePoint(A + (cc.charCodeAt(0) - a)) +
            String.fromCodePoint(A + (cc.charCodeAt(1) - a));
   }
-
-  function escHtml(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-  function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
 
   // ---- Event wiring ------------------------------------------------------
 
