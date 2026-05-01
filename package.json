@@ -1,0 +1,18 @@
+{
+  "name": "secure-paid-vpn-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-only VPN companion for SecurePaid VPN — Chrome & Firefox.",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "build:chrome": "node tools/build.mjs chrome",
+    "build:firefox": "node tools/build.mjs firefox",
+    "icons": "node tools/make-icons.mjs",
+    "package": "node tools/build.mjs && node tools/zip.mjs",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

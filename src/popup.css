@@ -1,0 +1,457 @@
+/* SecurePaid VPN — popup theme.
+   Mirrors VpnBackend's web :root vars and the mobile app's Colors.js. */
+
+:root {
+  --bg: #0a0a0d;
+  --bg-deep: #06060a;
+  --surface: #16161c;
+  --surface-alt: #1c1c24;
+  --surface-elev: #22222b;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #f1f1f4;
+  --text-muted: #9b9ba3;
+  --text-dim: #5e5e66;
+  --accent: #d4a04c;
+  --accent-deep: #b9863a;
+  --accent-soft: rgba(212, 160, 76, 0.16);
+  --accent-line: rgba(212, 160, 76, 0.45);
+  --pill: #f5f4f7;
+  --pill-dark: #dedce2;
+  --pill-text: #18181c;
+  --success: #6ee7b7;
+  --warning: #f5b265;
+  --danger: #f78a8a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 380px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+body { min-height: 480px; }
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 480px;
+  background:
+    radial-gradient(ellipse at top, rgba(212, 160, 76, 0.06), transparent 60%),
+    var(--bg);
+}
+
+.hidden { display: none !important; }
+
+/* ---- Top bar ----------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  display: block;
+  /* Logo art is already a finished gold shield — no extra styling needed.
+     Slight drop shadow lifts it off the dark topbar. */
+  filter: drop-shadow(0 0 4px rgba(212, 160, 76, 0.25));
+}
+.brand-mark--lg { width: 48px; height: 48px; }
+
+.brand-text { color: var(--text); font-size: 14px; }
+
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.icon-btn:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* ---- Views ------------------------------------------------------------- */
+.view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+}
+
+.loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Hero (auth + locked views) --------------------------------------- */
+.hero {
+  text-align: center;
+  padding: 4px 0 22px;
+}
+
+.hero-orb {
+  width: 64px;
+  height: 64px;
+  display: block;
+  margin: 6px auto 14px;
+  /* The logo is a shield, not a circle — preserve its silhouette but
+     give it a soft gold halo so it reads as the "premium" hero asset
+     rather than a plain icon. */
+  filter:
+    drop-shadow(0 0 12px rgba(212, 160, 76, 0.55))
+    drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+}
+.hero-orb--locked {
+  /* Desaturate the brand image when the user isn't premium — keeps the
+     same silhouette but visually communicates "locked". */
+  filter:
+    grayscale(0.85)
+    brightness(0.65)
+    drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+}
+
+.hero-title {
+  font-size: 18px;
+  margin: 0 0 6px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+.hero-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ---- Forms ------------------------------------------------------------- */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.field input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field input:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px rgba(212, 160, 76, 0.12);
+}
+
+.field-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* ---- Buttons ----------------------------------------------------------- */
+.btn {
+  appearance: none;
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  letter-spacing: 0.2px;
+}
+.btn:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.btn-primary {
+  background: linear-gradient(180deg, #ffffff 0%, #f6f5f8 45%, #ecebef 70%, #d8d6dc 100%);
+  color: var(--pill-text);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.4), inset 0 -1px 0 rgba(0,0,0,0.06);
+}
+.btn-primary:hover:not(:disabled) { transform: translateY(-1px); }
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+
+.btn-ghost {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--border-strong); }
+
+.link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px;
+  text-decoration: none;
+  align-self: center;
+}
+.link:hover { color: var(--accent-deep); text-decoration: underline; }
+.link-danger { color: var(--danger); }
+.link-danger:hover { color: #f6b0b0; }
+
+/* ---- Stack actions ----------------------------------------------------- */
+.actions { display: flex; }
+.actions.stack { flex-direction: column; gap: 10px; align-items: stretch; }
+
+/* ---- Form errors ------------------------------------------------------- */
+.form-error {
+  color: var(--danger);
+  font-size: 13px;
+  min-height: 18px;
+}
+
+/* ---- Status card / connect ------------------------------------------- */
+.status-card {
+  background: linear-gradient(180deg, var(--surface-alt), var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px 18px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  overflow: hidden;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.status-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.04);
+}
+
+.status-card[data-status="connecting"] .status-pill,
+.status-card[data-status="connected"]  .status-pill {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.status-card[data-status="connecting"] .dot { background: var(--warning); animation: pulse 1.2s infinite; }
+.status-card[data-status="connected"]  .dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(212, 160, 76, 0.18); }
+.status-card[data-status="error"]      .status-pill { color: var(--danger); border-color: rgba(247, 138, 138, 0.4); background: rgba(247, 138, 138, 0.12); }
+.status-card[data-status="error"]      .dot { background: var(--danger); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.status-server {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 0 4px;
+}
+.status-flag {
+  font-size: 28px;
+  line-height: 1;
+}
+.status-meta {
+  flex: 1;
+  min-width: 0;
+}
+.status-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.status-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Connect button — glossy white pill with gold halo on connected */
+.connect-pill {
+  position: relative;
+  appearance: none;
+  border: 0;
+  background: linear-gradient(180deg, #ffffff 0%, #f6f5f8 45%, #ecebef 70%, #d8d6dc 100%);
+  color: var(--pill-text);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 14px 32px;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(0,0,0,0.45);
+  transition: transform 0.1s ease;
+}
+.connect-pill:disabled { opacity: 0.55; cursor: not-allowed; }
+.connect-pill:hover:not(:disabled) { transform: translateY(-1px); }
+.connect-pill:active:not(:disabled) { transform: translateY(0); }
+
+.connect-halo {
+  position: absolute;
+  inset: -6px;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, rgba(212, 160, 76, 0.55), transparent 70%);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.status-card[data-status="connected"] .connect-halo { opacity: 1; }
+
+.status-error {
+  width: 100%;
+  background: rgba(247, 138, 138, 0.08);
+  border: 1px solid rgba(247, 138, 138, 0.3);
+  color: var(--danger);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+/* ---- Server list ------------------------------------------------------ */
+.server-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 18px 4px 8px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.server-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.server-row:hover { border-color: var(--border-strong); }
+.server-row[aria-selected="true"] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.server-row .flag { font-size: 22px; line-height: 1; }
+.server-row .meta { flex: 1; min-width: 0; }
+.server-row .name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.server-row .sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.server-row .badge {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+
+/* ---- Footer ----------------------------------------------------------- */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.footer-user { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+
+/* ---- Scrollbar -------------------------------------------------------- */
+.server-list::-webkit-scrollbar { width: 6px; }
+.server-list::-webkit-scrollbar-track { background: transparent; }
+.server-list::-webkit-scrollbar-thumb {
+  background: var(--surface-elev);
+  border-radius: 999px;
+}

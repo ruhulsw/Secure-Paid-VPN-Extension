@@ -1,0 +1,20 @@
+{
+  "background": {
+    "scripts": [
+      "lib/browser.js",
+      "lib/storage.js",
+      "lib/api.js",
+      "lib/proxy.js",
+      "background.js"
+    ]
+  },
+  "permissions_append": [
+    "webRequestBlocking"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "extension@securepaidvpn.com",
+      "strict_min_version": "115.0"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions_append": [
+    "webRequestAuthProvider"
+  ],
+  "minimum_chrome_version": "108"
+}

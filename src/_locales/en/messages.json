@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "SecurePaid VPN",
+    "description": "The name of the extension."
+  },
+  "extDescription": {
+    "message": "Browser-only VPN by SecurePaid VPN. Active subscription required.",
+    "description": "The description shown in the Chrome / Firefox web stores."
+  }
+}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SecurePaid VPN — Settings</title>
+  <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body class="options-body">
+  <main class="options-shell">
+    <header class="options-header">
+      <img class="brand-mark brand-mark--lg" src="icons/icon-128.png" alt="" width="48" height="48" />
+      <div>
+        <h1>SecurePaid VPN</h1>
+        <p class="muted">Extension settings</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Account</h2>
+      <div id="account-summary" class="kv">
+        <div class="kv-row"><span class="k">Signed in as</span><span class="v" id="account-email">—</span></div>
+        <div class="kv-row"><span class="k">Status</span><span class="v" id="account-premium">—</span></div>
+        <div class="kv-row"><span class="k">Plan</span><span class="v" id="account-plan">—</span></div>
+        <div class="kv-row"><span class="k">Renews / expires</span><span class="v" id="account-expires">—</span></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-ghost" id="manage-billing">Manage billing</button>
+        <button class="btn btn-ghost" id="logout">Sign out</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Connection</h2>
+      <div class="kv">
+        <div class="kv-row"><span class="k">Current state</span><span class="v" id="conn-state">—</span></div>
+        <div class="kv-row"><span class="k">Server</span><span class="v" id="conn-server">—</span></div>
+        <div class="kv-row"><span class="k">Proxy</span><span class="v" id="conn-proxy">—</span></div>
+      </div>
+      <div class="row">
+        <button class="btn btn-ghost" id="refresh-state">Refresh status</button>
+        <button class="btn btn-ghost" id="force-disconnect">Disconnect</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Preferences</h2>
+      <label class="toggle">
+        <input type="checkbox" id="setting-notifications" />
+        <span>Show desktop notifications on connect / disconnect</span>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="setting-autoconnect" />
+        <span>Reconnect automatically when the browser starts</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Advanced</h2>
+      <label class="field">
+        <span class="field-label">API base URL</span>
+        <input type="url" id="setting-api-base" />
+        <span class="field-hint">Points to your SecurePaid VPN backend. Change only if you self-host.</span>
+      </label>
+      <div class="row">
+        <button class="btn btn-primary" id="save-advanced">Save</button>
+        <button class="btn btn-ghost" id="reset-advanced">Reset to default</button>
+      </div>
+    </section>
+
+    <footer class="options-footer">
+      <span class="muted">v<span id="ext-version">1.0.0</span></span>
+      <a href="#" id="open-help" class="link">Help</a>
+      <a href="#" id="open-privacy" class="link">Privacy</a>
+    </footer>
+  </main>
+
+  <script src="lib/browser.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

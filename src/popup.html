@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=380" />
+  <title>SecurePaid VPN</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="root">
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-mark" src="icons/icon-48.png" alt="" width="22" height="22" />
+        <span class="brand-text">SecurePaid VPN</span>
+      </div>
+      <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8m9.4 4 .94 1.62a1 1 0 0 1-.36 1.37l-1.65.95a8 8 0 0 1-1.27 2.2l.07 1.9a1 1 0 0 1-.83 1.04l-1.85.32a8 8 0 0 1-2.2 1.27l-.95 1.65a1 1 0 0 1-1.37.36L12 23.34l-1.62.94a1 1 0 0 1-1.37-.36l-.95-1.65a8 8 0 0 1-2.2-1.27l-1.85-.32a1 1 0 0 1-.83-1.04l.07-1.9a8 8 0 0 1-1.27-2.2L.33 14.6a1 1 0 0 1-.36-1.37L.91 11.6.97 9.7l-.04-.05a1 1 0 0 1 .36-1.37l1.65-.95a8 8 0 0 1 1.27-2.2L4.14 3.23a1 1 0 0 1 .83-1.04l1.85-.32A8 8 0 0 1 9.02.6L9.97-1.05a1 1 0 0 1 1.37-.36l1.6.93 1.7.03a1 1 0 0 1 1.04.83l.32 1.85a8 8 0 0 1 2.2 1.27l1.9-.07a1 1 0 0 1 1.04.83l.32 1.85a8 8 0 0 1 1.27 2.2l1.65.95a1 1 0 0 1 .36 1.37L21.4 12Z" />
+        </svg>
+      </button>
+    </header>
+
+    <!-- Auth view (signed-out) -->
+    <section id="view-auth" class="view hidden">
+      <div class="hero">
+        <img class="hero-orb" src="icons/icon-128.png" alt="" width="64" height="64" />
+        <h1 class="hero-title">Sign in to connect</h1>
+        <p class="hero-sub">Use the same account as the website or mobile app.</p>
+      </div>
+      <form id="login-form" class="form">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" id="login-email" autocomplete="email" required />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input type="password" id="login-password" autocomplete="current-password" required minlength="8" />
+        </label>
+        <div id="login-error" class="form-error" role="alert"></div>
+        <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
+        <button type="button" class="btn btn-ghost" id="show-signup">Create account</button>
+        <a href="#" class="link" id="forgot-link">Forgot password?</a>
+      </form>
+
+      <form id="signup-form" class="form hidden">
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input type="text" id="signup-name" autocomplete="name" required />
+        </label>
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" id="signup-email" autocomplete="email" required />
+        </label>
+        <label class="field">
+          <span class="field-label">Password</span>
+          <input type="password" id="signup-password" autocomplete="new-password" required minlength="8" />
+          <span class="field-hint">8 characters minimum</span>
+        </label>
+        <div id="signup-error" class="form-error" role="alert"></div>
+        <button type="submit" class="btn btn-primary" id="signup-submit">Create account</button>
+        <button type="button" class="btn btn-ghost" id="show-login">Back to sign in</button>
+      </form>
+    </section>
+
+    <!-- Locked (signed-in but not premium) -->
+    <section id="view-locked" class="view hidden">
+      <div class="hero">
+        <img class="hero-orb hero-orb--locked" src="icons/icon-128.png" alt="" width="64" height="64" />
+        <h1 class="hero-title">Subscription required</h1>
+        <p class="hero-sub">Choose a plan to start protecting your browser traffic.</p>
+      </div>
+      <div class="actions stack">
+        <button id="open-pricing" class="btn btn-primary">View plans</button>
+        <button id="locked-refresh" class="btn btn-ghost">I just subscribed — refresh</button>
+        <button id="locked-logout" class="link link-danger">Sign out</button>
+      </div>
+    </section>
+
+    <!-- Main connect view -->
+    <section id="view-main" class="view hidden">
+      <div class="status-card" id="status-card">
+        <div class="status-pill" id="status-pill">
+          <span class="dot"></span>
+          <span class="status-pill-text">Disconnected</span>
+        </div>
+        <div class="status-server" id="status-server">
+          <span class="status-flag" id="status-flag">🌐</span>
+          <div class="status-meta">
+            <div class="status-name" id="status-name">No location selected</div>
+            <div class="status-sub" id="status-sub">Choose a server below</div>
+          </div>
+        </div>
+        <button id="connect-btn" class="connect-pill" disabled>
+          <span class="connect-halo"></span>
+          <span class="connect-label">Connect</span>
+        </button>
+        <div class="status-error" id="status-error" hidden></div>
+      </div>
+
+      <div class="server-list-header">
+        <span>Servers</span>
+        <button id="refresh-servers" class="link" title="Refresh server list">Refresh</button>
+      </div>
+      <ul class="server-list" id="server-list" aria-label="VPN server list"></ul>
+
+      <footer class="footer">
+        <span class="footer-user" id="footer-user"></span>
+        <button id="footer-settings" class="link">Settings</button>
+      </footer>
+    </section>
+
+    <!-- Boot/loading -->
+    <section id="view-loading" class="view loading">
+      <div class="spinner" aria-label="Loading"></div>
+    </section>
+  </div>
+
+  <script src="lib/browser.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
