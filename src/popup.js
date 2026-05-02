@@ -132,11 +132,12 @@
       els.statusSub.textContent  = 'Choose a server below';
     }
 
-    var btnLabel = status === 'connected' ? 'Disconnect'
-                 : status === 'connecting' ? 'Cancel'
-                 : 'Connect';
+    var btnLabel = status === 'connected' ? 'Tap to Disconnect'
+                 : status === 'connecting' ? 'Connecting…'
+                 : status === 'disconnecting' ? 'Disconnecting…'
+                 : 'Tap to Connect';
     els.connectBtn.querySelector('.connect-label').textContent = btnLabel;
-    els.connectBtn.disabled = !selected || status === 'connecting';
+    els.connectBtn.disabled = !selected || status === 'connecting' || status === 'disconnecting';
 
     if (status === 'error' && conn.error) {
       els.statusError.hidden = false;
@@ -316,9 +317,15 @@
     BX.runtime.openOptionsPage().catch(function () {});
   });
 
+  // Buttons now contain a leading SVG icon + a `.btn-label` span. Update
+  // only the span so the icon survives. Falls back to textContent for
+  // legacy buttons that don't yet have a `.btn-label`.
   function setBusy(btn, busy, label) {
     btn.disabled = !!busy;
-    if (label) btn.textContent = label;
+    if (label == null) return;
+    var lbl = btn.querySelector('.btn-label');
+    if (lbl) lbl.textContent = label;
+    else btn.textContent = label;
   }
 
   // Live updates from the background — re-render whenever connection /
