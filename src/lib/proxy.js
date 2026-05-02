@@ -17,6 +17,25 @@
     '*.securepaidvpn.com',
   ];
 
+  // Recognized proxy schemes. Anything outside this set used to silently
+  // downgrade to plain `http://`, which would tunnel the user's browser
+  // traffic over an unencrypted proxy. Hard-fail instead.
+  var SUPPORTED_SCHEMES_CHROMIUM = { socks5: 1, socks4: 1, https: 1, http: 1 };
+
+  function mergeBypassList(bypassList) {
+    // Always include BYPASS_DEFAULT (`localhost`, `127.0.0.1`, `<local>`)
+    // and ALWAYS_BYPASS regardless of what the backend sends. If the
+    // backend ever returns an empty bypassList, we'd otherwise route
+    // localhost through the proxy and break dev tools / internal hosts.
+    var seen = Object.create(null);
+    var merged = [];
+    [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS).forEach(function (h) {
+      var k = String(h).toLowerCase();
+      if (!seen[k]) { seen[k] = 1; merged.push(h); }
+    });
+    return merged;
+  }
+
   function setProxyChromium(proxy, bypassList) {
     // Chrome / Edge / Firefox MV3 — proxy.settings.set with a fixed_servers
     // config. `singleProxy` with scheme:socks5 is documented to apply to
@@ -24,25 +43,19 @@
     // too but is more error-prone in some Chrome versions, so prefer
     // singleProxy as the canonical shape.
     var scheme = (proxy.type || 'socks5').toLowerCase();
-    var pacScheme = scheme === 'socks5' ? 'socks5'
-                  : scheme === 'socks4' ? 'socks4'
-                  : scheme === 'https'  ? 'https'
-                  : 'http';
+    if (!SUPPORTED_SCHEMES_CHROMIUM[scheme]) {
+      var typeErr = new Error('Unsupported proxy type from server: "' + proxy.type + '"');
+      typeErr.code = 'UNSUPPORTED_PROXY_TYPE';
+      return Promise.reject(typeErr);
+    }
 
     var server = {
-      scheme: pacScheme,
+      scheme: scheme,
       host: proxy.host,
       port: Number(proxy.port),
     };
 
-    var requestedBypass = (bypassList && bypassList.length ? bypassList : BYPASS_DEFAULT).slice();
-    // Merge ALWAYS_BYPASS in (deduped) — see comment on ALWAYS_BYPASS.
-    var seen = Object.create(null);
-    var mergedBypass = [];
-    requestedBypass.concat(ALWAYS_BYPASS).forEach(function (h) {
-      var k = String(h).toLowerCase();
-      if (!seen[k]) { seen[k] = 1; mergedBypass.push(h); }
-    });
+    var mergedBypass = mergeBypassList(bypassList);
 
     var config = {
       mode: 'fixed_servers',
@@ -52,7 +65,7 @@
       },
     };
 
-    console.log('[proxy] setting', pacScheme + '://' + proxy.host + ':' + proxy.port,
+    console.log('[proxy] setting', scheme + '://' + proxy.host + ':' + proxy.port,
                 'bypass=', mergedBypass.join(','));
 
     return new Promise(function (resolve, reject) {
@@ -61,7 +74,18 @@
           var lastErr = BX.raw.runtime && BX.raw.runtime.lastError;
           if (lastErr) {
             console.error('[proxy] settings.set failed:', lastErr.message);
-            return reject(new Error('Proxy config rejected: ' + lastErr.message));
+            // Map Chrome's "controlled by another extension" error to a
+            // typed code so the popup can show a friendlier banner.
+            var msg = lastErr.message || '';
+            var err = new Error('Proxy config rejected: ' + msg);
+            if (/controlled by other extensions/i.test(msg) ||
+                /controlled_by_other_extensions/i.test(msg)) {
+              err.code = 'PROXY_CONTROLLED_BY_OTHER_EXTENSION';
+              err.message =
+                'Another extension (or system policy) is controlling Chrome’s ' +
+                'proxy settings. Disable it and try again.';
+            }
+            return reject(err);
           }
           resolve();
         });
@@ -175,8 +199,10 @@
   var firefoxProxyInfo = null;
 
   function buildBypassMatcher(bypassList) {
-    var raw = (bypassList && bypassList.length ? bypassList : BYPASS_DEFAULT)
-      .concat(ALWAYS_BYPASS);
+    // Mirror mergeBypassList: always include BYPASS_DEFAULT + ALWAYS_BYPASS
+    // regardless of what the backend sends, so localhost / 127.0.0.1 /
+    // securepaidvpn.com always bypass even if bypassList is missing.
+    var raw = [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS);
     var exact = Object.create(null);
     var suffixes = [];
     raw.forEach(function (h) {
@@ -212,12 +238,17 @@
       return setProxyChromium(proxy, bypassList);
     }
 
-    var pacType = (proxy.type || 'https').toLowerCase();
-    if (pacType === 'socks5') pacType = 'socks';
-    if (pacType === 'socks4') pacType = 'socks4';
-    // Firefox's ProxyInfo `type` accepts: direct, http, https, socks, socks4
+    // Firefox's ProxyInfo `type` accepts: direct, http, https, socks, socks4.
+    // Map the backend's `socks5` to Firefox's `socks`. Anything outside this
+    // set is rejected — see SUPPORTED_SCHEMES_CHROMIUM rationale: silent
+    // downgrade to plain `http` would tunnel traffic over an unencrypted
+    // proxy.
+    var rawType = (proxy.type || '').toLowerCase();
+    var pacType = rawType === 'socks5' ? 'socks' : rawType;
     if (['http', 'https', 'socks', 'socks4'].indexOf(pacType) === -1) {
-      pacType = 'http';
+      var typeErr = new Error('Unsupported proxy type from server: "' + proxy.type + '"');
+      typeErr.code = 'UNSUPPORTED_PROXY_TYPE';
+      return Promise.reject(typeErr);
     }
 
     firefoxProxyInfo = {
@@ -296,7 +327,9 @@
   // the listener would cancel the auth challenge — which surfaces as
   // ERR_SOCKS_CONNECTION_FAILED (the SOCKS handshake never completes).
   var activeCredentials = null;
-  var STORAGE_KEY = '__proxyCredentials';
+  // Single source of truth for the storage key — same one Storage.clearAuth
+  // wipes on logout (Storage.KEYS.PROXY_CREDS).
+  var STORAGE_KEY = (typeof Storage !== 'undefined' && Storage.KEYS && Storage.KEYS.PROXY_CREDS) || '__proxyCredentials';
 
   function setActiveCredentials(creds) {
     activeCredentials = creds && creds.username ? {
@@ -347,6 +380,12 @@
   }
 
   function installAuthListener() {
+    // Firefox doesn't need this hook: ProxyInfo.{username,password} in the
+    // proxy.onRequest return value is sent inline. The auth-required path
+    // only fires for HTTP-layer 407s, which a correctly configured SOCKS5
+    // proxy never raises in Firefox. Skipping it avoids touching
+    // webRequestBlocking on Firefox installs that didn't grant it.
+    if (BX.isFirefox) return;
     if (!BX.webRequest || !BX.webRequest.onAuthRequired) {
       console.warn('[proxy] webRequest.onAuthRequired unavailable');
       return;
@@ -416,6 +455,35 @@
     console.log('[proxy] onAuthRequired listener installed');
   }
 
+  // Firefox-only: re-register proxy.onRequest after a background script
+  // restart. Firefox MV3 background gets terminated like Chrome's SW; the
+  // in-memory listener dies with it and the browser silently switches to
+  // direct browsing. Returning false means "could not rehydrate, treat as
+  // disconnected"; true means the listener is back and the proxy is live.
+  function rehydrateFirefoxProxy(connection) {
+    if (!BX.isFirefox) return Promise.resolve(false);
+    if (!connection || connection.status !== 'connected' || !connection.proxy) {
+      return Promise.resolve(false);
+    }
+    return loadActiveCredentialsFromStorage().then(function (creds) {
+      if (!creds || !creds.username) return false;
+      var fullProxy = {
+        type: connection.proxy.type,
+        host: connection.proxy.host,
+        port: connection.proxy.port,
+        username: creds.username,
+        password: creds.password,
+      };
+      // bypassList isn't persisted per-server; mergeBypassList /
+      // buildBypassMatcher always include the safe defaults anyway.
+      return setProxyFirefox(fullProxy, []).then(function () { return true; })
+        .catch(function (e) {
+          console.warn('[proxy] firefox rehydrate failed:', e && e.message);
+          return false;
+        });
+    });
+  }
+
   var ProxyCtl = {
     apply: function (proxy, bypassList) {
       setActiveCredentials({ username: proxy.username, password: proxy.password });
@@ -434,6 +502,7 @@
       uninstallAuthListener();
       return BX.isFirefox ? clearProxyFirefox() : clearProxyChromium();
     },
+    rehydrateFirefoxProxy: rehydrateFirefoxProxy,
     installAuthListener: installAuthListener,
     getActiveCredentials: getActiveCredentials,
   };

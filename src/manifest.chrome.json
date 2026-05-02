@@ -5,5 +5,5 @@
   "permissions_append": [
     "webRequestAuthProvider"
   ],
-  "minimum_chrome_version": "108"
+  "minimum_chrome_version": "117"
 }

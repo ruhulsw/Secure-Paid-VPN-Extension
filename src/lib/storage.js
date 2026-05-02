@@ -14,6 +14,11 @@
     CONNECTION: 'connection',
     DEVICE_UUID: 'deviceUuid',
     SETTINGS: 'settings',
+    // Stored only while a proxy session is active. Owned by lib/proxy.js;
+    // listed here so clearAuth() can wipe it on sign-out (otherwise SOCKS
+    // creds for the dead session linger in storage.local until the next
+    // connect overwrites them).
+    PROXY_CREDS: '__proxyCredentials',
   };
 
   var DEFAULT_SETTINGS = {
@@ -54,7 +59,13 @@
       var obj = {}; obj[KEYS.AUTH_TOKEN] = token; return BX.storage.set(obj);
     },
     clearAuth: function () {
-      return BX.storage.remove([KEYS.AUTH_TOKEN, KEYS.USER, KEYS.IS_PREMIUM, KEYS.SUBSCRIPTION]);
+      return BX.storage.remove([
+        KEYS.AUTH_TOKEN,
+        KEYS.USER,
+        KEYS.IS_PREMIUM,
+        KEYS.SUBSCRIPTION,
+        KEYS.PROXY_CREDS,
+      ]);
     },
 
     getUser: function () {

@@ -66,19 +66,18 @@
   function refreshMe() {
     if (STATE.refreshing) return Promise.resolve(null);
     STATE.refreshing = true;
-    return configureApi().then(function (cfg) {
-      if (!cfg.token) {
-        STATE.refreshing = false;
-        return null;
-      }
+    // .finally guarantees the lock is released even if configureApi() or
+    // any storage call throws synchronously. The earlier hand-rolled
+    // resets missed the configureApi-rejects case and could leave the
+    // flag stuck `true` for the rest of the SW lifetime.
+    var p = configureApi().then(function (cfg) {
+      if (!cfg.token) return null;
       return api.me().then(function (resp) {
-        STATE.refreshing = false;
         return Promise.all([
           Storage.setUser(resp.user || null),
           Storage.setPremium(!!resp.isPremium, resp.subscription || null),
         ]).then(function () { return resp; });
       }).catch(function (err) {
-        STATE.refreshing = false;
         // Token is invalid / expired → drop it and force user to re-auth.
         if (err && (err.status === 401 || err.status === 403)) {
           return Storage.clearAuth().then(function () {
@@ -88,6 +87,7 @@
         throw err;
       });
     });
+    return p.finally(function () { STATE.refreshing = false; });
   }
 
   // ---- Connect / disconnect ----------------------------------------------
@@ -131,6 +131,13 @@
               setBadge('ON', '#d4a04c');
               broadcastState();
               notify('Connected', 'Routing browser traffic through ' + (resp.server.city || resp.server.country) + '.');
+              // Kick off the public-IP lookup in the background — it runs
+              // through the freshly-applied proxy (api.ipify.org isn't in
+              // the bypass list) and updates the connection state when it
+              // resolves. force:true skips the TTL cache since the exit
+              // IP just changed. Don't await: connect() should return the
+              // moment the proxy is live.
+              updatePublicIp({ force: true });
               return conn;
             });
           });
@@ -201,12 +208,74 @@
       });
   }
 
+  // ---- Public-IP lookup --------------------------------------------------
+  // Fired right after a successful connect. Routes through the proxy
+  // (api.ipify.org isn't in ALWAYS_BYPASS), so the IP we get back is the
+  // exit-node's egress address — exactly what the user wants to see in
+  // the Virtual IP card. Best-effort: any failure leaves publicIp unset
+  // and the popup shows "—" rather than guessing.
+  //
+  // Rate-limit: in MV3 the SW restarts dozens of times per browsing day,
+  // and bootstrap re-runs this for any still-connected session. Cap to
+  // one lookup per PUBLIC_IP_TTL_MS unless `force` is set (used right
+  // after a fresh connect when the IP definitely changed).
+  var PUBLIC_IP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+  function updatePublicIp(opts) {
+    var force = opts && opts.force;
+    return Storage.getConnection().then(function (conn) {
+      if (!conn || conn.status !== 'connected') return;
+      if (!force && conn.publicIp && conn.publicIpAt &&
+          (Date.now() - conn.publicIpAt) < PUBLIC_IP_TTL_MS) {
+        return; // recent enough — don't hammer ipify
+      }
+      var controller = typeof AbortController === 'function' ? new AbortController() : null;
+      var timeoutId = setTimeout(function () {
+        if (controller) controller.abort();
+      }, 10000);
+      var fetchOpts = { credentials: 'omit', cache: 'no-store' };
+      if (controller) fetchOpts.signal = controller.signal;
+
+      return fetch('https://api.ipify.org?format=json', fetchOpts)
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          return data && data.ip ? String(data.ip) : null;
+        })
+        .then(function (ip) {
+          if (!ip) return;
+          return Storage.getConnection().then(function (current) {
+            // Race guard: if the user disconnected (or hit an error) while
+            // ipify was in flight, don't write a stale IP into a
+            // non-connected state.
+            if (!current || current.status !== 'connected') return;
+            current.publicIp = ip;
+            current.publicIpAt = Date.now();
+            return Storage.setConnection(current).then(function () { broadcastState(); });
+          });
+        })
+        .catch(function (err) {
+          console.warn('[bg] public IP lookup failed:', err && err.message);
+        })
+        .then(function () { clearTimeout(timeoutId); });
+    });
+  }
+
   function reloadHttpTabs() {
     if (!BX.tabs || typeof BX.tabs.query !== 'function') return;
     try {
+      // Skip the currently focused tab. Reloading it steals focus from
+      // the action popup, which Chrome auto-dismisses on focus loss —
+      // so the user sees the popup vanish the instant they tap
+      // Disconnect. Background tabs still get reloaded (that's where
+      // most stale keep-alive sockets live anyway); the user can
+      // reload the active tab themselves if they want.
       BX.tabs.query({}, function (tabs) {
         (tabs || []).forEach(function (t) {
           if (!t || !t.id || t.discarded) return;
+          if (t.active) return;
           if (!t.url || !/^https?:\/\//i.test(t.url)) return;
           try { BX.tabs.reload(t.id, { bypassCache: false }); } catch (_) {}
         });
@@ -420,31 +489,92 @@
 
   // ---- Lifecycle ----------------------------------------------------------
 
+  // Returns true if the browser is currently routing through our proxy.
+  // Chromium: chrome.proxy.settings persist across SW restarts, so we ask
+  // the API directly. Firefox: the per-request proxy.onRequest listener is
+  // in-memory and dies with the SW, so a fresh SW lifetime always means
+  // direct browsing — return false.
+  function isProxyStillActive() {
+    if (BX.isFirefox) return Promise.resolve(false);
+    if (!BX.proxy || !BX.proxy.settings || !BX.proxy.settings.get) {
+      return Promise.resolve(false);
+    }
+    return new Promise(function (resolve) {
+      try {
+        BX.proxy.settings.get({ incognito: false }, function (details) {
+          var mode = details && details.value && details.value.mode;
+          // Treat the dead-end (127.0.0.1:1) we use as a teardown step
+          // as not-active; it'll get cleared to 'direct' shortly.
+          var rules = details && details.value && details.value.rules;
+          var single = rules && rules.singleProxy;
+          var deadEnd = single && single.host === '127.0.0.1' && Number(single.port) === 1;
+          resolve(mode === 'fixed_servers' && !deadEnd);
+        });
+      } catch (_) { resolve(false); }
+    });
+  }
+
   function bootstrap() {
     if (STATE.bootstrapped) return;
     STATE.bootstrapped = true;
     ensureAlarm();
     ProxyCtl.installAuthListener();
     configureApi().then(function (cfg) {
-      // Reset stale connection status on bootstrap. The persisted
-      // status (could be 'connected', 'connecting', 'error', etc.
-      // from a previous SW lifetime) is no longer authoritative —
-      // Chrome wipes proxy.settings when the SW dies, so the actual
-      // browser state on boot is always "no proxy active".
+      // Reconcile the persisted connection status against the browser's
+      // *actual* proxy state. The SW gets terminated aggressively in MV3
+      // (~30s idle), and on Chromium chrome.proxy.settings survives that
+      // termination — so a stored "connected" with the proxy still in
+      // fixed_servers mode is genuinely connected, not stale. Wiping it
+      // unconditionally (an earlier version did this) made the popup show
+      // "NOT CONNECTED" while the action badge still said ON and the
+      // browser was still tunneling. Now: keep "connected" only if the
+      // proxy verifies; otherwise reset.
       //
       // Critically: do NOT auto-reconnect here. Earlier versions
       // re-issued connect() if conn.status === 'connected', which
       // surprised users — opening the popup or any other event that
       // wakes the SW would silently start a connection attempt
-      // without their consent. The status pill would flash
-      // "Connecting" out of nowhere. Always start disconnected; let
-      // the user explicitly tap Connect.
-      Storage.getConnection().then(function (conn) {
-        if (conn && conn.status !== 'disconnected') {
-          return Storage.setConnection({ status: 'disconnected', at: Date.now() })
-            .then(function () { broadcastState(); });
-        }
-      }).catch(function () {});
+      // without their consent.
+      Storage.getConnection()
+        .then(function (conn) {
+          // Firefox: the proxy.onRequest listener died with the script.
+          // Try to re-register it from the persisted descriptor + creds.
+          // If that succeeds, the user keeps tunneling through this SW
+          // lifetime; if not, we fall through to the disconnect path.
+          // Without this step, every Firefox SW restart silently drops
+          // the VPN — the popup looks disconnected but the badge says ON
+          // and the user thinks they're still protected.
+          return ProxyCtl.rehydrateFirefoxProxy(conn).then(function (rehydrated) {
+            return { conn: conn, rehydrated: rehydrated };
+          });
+        })
+        .then(function (state) {
+          var conn = state.conn;
+          var rehydrated = state.rehydrated;
+          if (rehydrated) {
+            // Firefox path: listener is back, treat as connected.
+            setBadge('ON', '#d4a04c');
+            broadcastState();
+            updatePublicIp();
+            return;
+          }
+          return isProxyStillActive().then(function (alive) {
+            if (alive && conn && conn.status === 'connected') {
+              // Chromium path: chrome.proxy.settings survives SW restarts.
+              // Keep state, restore the badge, refresh the public IP since
+              // the network path may have moved.
+              setBadge('ON', '#d4a04c');
+              broadcastState();
+              updatePublicIp();
+              return;
+            }
+            if (conn && conn.status !== 'disconnected') {
+              return Storage.setConnection({ status: 'disconnected', at: Date.now() })
+                .then(function () { broadcastState(); });
+            }
+          });
+        })
+        .catch(function () {});
 
       if (cfg.token) {
         refreshMe().catch(function () { /* token may be expired; UI handles */ });

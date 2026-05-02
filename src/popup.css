@@ -146,14 +146,12 @@ body {
   background: var(--text-dim);
 }
 
-#root[data-status="connecting"] .status-pill,
-#root[data-status="disconnecting"] .status-pill {
+#root[data-status="connecting"] .status-pill {
   border-color: var(--warning);
   color: var(--warning);
   background: rgba(245, 178, 101, 0.08);
 }
-#root[data-status="connecting"] .status-pill .dot,
-#root[data-status="disconnecting"] .status-pill .dot {
+#root[data-status="connecting"] .status-pill .dot {
   background: var(--warning);
   animation: pulse 1.2s infinite;
 }
@@ -398,13 +396,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 4px 0 10px;
+  margin: 18px 0 22px;
   /* Bound the orb's animation area so the breathing aura + pulse
      rings don't bleed into the header above or the selected-location
-     card below. Height = orb 150 + ~30 buffer for the gold halo
-     glow on connected. overflow:hidden clips the outermost pulse
-     ring frame (scale 1.35) before it reaches adjacent elements. */
-  height: 180px;
+     card below. Height = orb 150 + buffer for the gold halo glow
+     on connected + extra breathing space above/below. overflow:hidden
+     clips the outermost pulse ring frame (scale 1.35) before it
+     reaches adjacent elements. */
+  height: 210px;
   overflow: hidden;
   position: relative;
   flex-shrink: 0;
@@ -520,8 +519,7 @@ body {
   color: var(--accent);
   filter: drop-shadow(0 0 12px rgba(212,160,76,0.7));
 }
-#root[data-status="connecting"] .connect-icon,
-#root[data-status="disconnecting"] .connect-icon {
+#root[data-status="connecting"] .connect-icon {
   animation: spin 1.1s linear infinite;
 }
 
@@ -590,19 +588,21 @@ body {
   margin-top: 12px;
 }
 
-/* ---- 2x2 Stats grid (mirrors macOS HomeComponents.StatCard) ---------- */
+/* ---- Stats row (Uptime + Virtual IP) --------------------------------- */
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 10px;
   margin-top: 10px;
+  align-items: stretch;
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
-  padding: 10px;
+  padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;

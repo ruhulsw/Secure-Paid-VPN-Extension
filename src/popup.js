@@ -72,8 +72,6 @@
     // Stats
     statUptime:   $('stat-uptime'),
     statIp:       $('stat-ip'),
-    statDownload: $('stat-download'),
-    statUpload:   $('stat-upload'),
 
     // Tabs
     tabBtns:  document.querySelectorAll('.tab-btn'),
@@ -168,7 +166,6 @@
     els.statusPill.querySelector('.status-pill-text').textContent =
       status === 'connecting' ? 'Connecting'
       : status === 'connected' ? 'Protected'
-      : status === 'disconnecting' ? 'Disconnecting'
       : status === 'error' ? 'Error'
       : 'Not Connected';
 
@@ -188,10 +185,9 @@
 
     var btnLabel = status === 'connected' ? 'Tap to Disconnect'
                  : status === 'connecting' ? 'Connecting…'
-                 : status === 'disconnecting' ? 'Disconnecting…'
                  : 'Tap to Connect';
     els.connectBtn.querySelector('.connect-label').textContent = btnLabel;
-    els.connectBtn.disabled = !selected || status === 'connecting' || status === 'disconnecting';
+    els.connectBtn.disabled = !selected || status === 'connecting';
 
     if (status === 'error' && conn.error) {
       els.statusError.hidden = false;
@@ -202,6 +198,12 @@
         detail = 'Active subscription required to connect.';
       } else if (conn.code === 'DEVICE_LIMIT') {
         detail = conn.error;
+      } else if (conn.code === 'PROXY_CONTROLLED_BY_OTHER_EXTENSION') {
+        detail = 'Another extension (or system policy) is controlling the browser proxy. ' +
+                 'Disable it and try Connect again.';
+      } else if (conn.code === 'UNSUPPORTED_PROXY_TYPE') {
+        detail = 'This server returned an unsupported proxy type. Try a different server, ' +
+                 'or contact support if the problem persists.';
       }
       els.statusError.textContent = detail;
     } else {
@@ -212,17 +214,15 @@
     // Stats grid (Home tab) — UPTIME ticks via setInterval, others state-driven
     updateUptime(conn);
     if (els.statIp) {
-      els.statIp.textContent = (status === 'connected' && selected) ? fakeIp(selected) : '—';
-    }
-    // Download / Upload — the browser proxy gives us no per-request
-    // byte counters in MV3, so these stay as placeholders. Showing
-    // "—" when disconnected and "0 B" when connected so the cards
-    // look alive without lying about traffic volume.
-    if (els.statDownload) {
-      els.statDownload.textContent = status === 'connected' ? '0 B' : '—';
-    }
-    if (els.statUpload) {
-      els.statUpload.textContent = status === 'connected' ? '0 B' : '—';
+      // background.js looks up the real exit IP via api.ipify.org right
+      // after the proxy is applied and writes it back into conn.publicIp.
+      // Until that resolves we show "…" so the card doesn't flash a stale
+      // value or claim "—" while a lookup is in flight.
+      if (status === 'connected') {
+        els.statIp.textContent = conn.publicIp || '…';
+      } else {
+        els.statIp.textContent = '—';
+      }
     }
 
     // Locations tab — list with optional search filter
@@ -235,21 +235,18 @@
     renderServerList(filteredServers, selectedId, conn);
 
     // Premium tab
-    var sub = state.subscription || {};
+    var subView = formatSubscription(state.subscription);
     if (els.premiumStatus) {
-      els.premiumStatus.textContent = sub.status || 'Active';
+      els.premiumStatus.textContent = subView.status;
       els.premiumStatus.className = 'info-value premium-active';
     }
     if (els.premiumPlan) {
-      var planName = sub.plan || sub.planName || sub.priceId || '';
-      els.premiumPlan.textContent = planName || 'Premium';
+      els.premiumPlan.textContent = subView.plan;
       els.premiumPlanRow.hidden = false;
     }
     if (els.premiumRenew) {
-      var renew = sub.currentPeriodEnd || sub.renewsAt || sub.nextBillingDate;
-      if (renew) {
-        var d = new Date(renew * (typeof renew === 'number' && renew < 1e12 ? 1000 : 1));
-        els.premiumRenew.textContent = isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+      if (subView.renewLabel) {
+        els.premiumRenew.textContent = subView.renewLabel;
         els.premiumRenewRow.hidden = false;
       } else {
         els.premiumRenewRow.hidden = true;
@@ -354,18 +351,24 @@
     uptimeTimer = setInterval(paint, 1000);
   }
 
-  // Deterministic placeholder "virtual IP" — same recipe as the mobile
-  // app's utils/format.fakeIp(server). Hashes the server id into an
-  // RFC1918 10.x.y.z address so the stat card has something to show.
-  function fakeIp(server) {
-    if (!server || !server.id) return '—';
-    var h = 0;
-    var id = String(server.id);
-    for (var i = 0; i < id.length; i++) h = (h + id.charCodeAt(i)) >>> 0;
-    var b = (((h >>> 16) & 0xff) % 254) + 1;
-    var c = (((h >>> 8)  & 0xff) % 254) + 1;
-    var d = ((h          & 0xff) % 254) + 1;
-    return '10.' + b + '.' + c + '.' + d;
+  // Backend subscription objects come in two shapes depending on whether
+  // the row was last touched by the website or the mobile app. Normalize
+  // here so popup + options render the same fields and one place owns
+  // the field-name fallbacks. Keep this function in sync with
+  // options.js's renderer (it imports the same shape).
+  function formatSubscription(sub) {
+    sub = sub || {};
+    var plan = sub.plan || sub.planKey || sub.planName || sub.priceId || 'Premium';
+    var status = sub.status || 'Active';
+    var renew = sub.expiresAt || sub.currentPeriodEnd || sub.renewsAt || sub.nextBillingDate;
+    var renewLabel = '';
+    if (renew) {
+      // Numeric values < 1e12 are unix-seconds; everything else (ISO
+      // strings, ms timestamps) goes straight to Date.
+      var d = new Date(typeof renew === 'number' && renew < 1e12 ? renew * 1000 : renew);
+      renewLabel = isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+    }
+    return { plan: plan, status: status, renewLabel: renewLabel };
   }
 
   function flagEmoji(cc) {
@@ -468,7 +471,7 @@
   els.connectBtn.addEventListener('click', function () {
     if (!state) return;
     var conn = state.connection || { status: 'disconnected' };
-    if (conn.status === 'connected' || conn.status === 'connecting' || conn.status === 'disconnecting') {
+    if (conn.status === 'connected' || conn.status === 'connecting') {
       send('disconnect').then(refresh).catch(function () { refresh(); });
       return;
     }
