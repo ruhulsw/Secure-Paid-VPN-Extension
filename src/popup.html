@@ -7,58 +7,90 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <div id="root">
-    <header class="topbar">
+  <div id="root" data-status="disconnected">
+    <!-- Single consolidated header (mirrors mobile app's header row) -->
+    <header class="app-header">
       <div class="brand">
-        <img class="brand-mark" src="icons/icon-48.png" alt="" width="22" height="22" />
-        <span class="brand-text">SecurePaid VPN</span>
+        <span class="brand-mark"><img src="icons/icon-48.png" alt="" width="22" height="22" /></span>
+        <div class="brand-text-block">
+          <div class="brand-name">Secure Paid <span class="brand-accent">VPN</span></div>
+          <div class="brand-sub" id="brand-sub" hidden>Premium · Unlimited</div>
+        </div>
       </div>
-      <button id="settings-btn" class="icon-btn" title="Settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8m9.4 4 .94 1.62a1 1 0 0 1-.36 1.37l-1.65.95a8 8 0 0 1-1.27 2.2l.07 1.9a1 1 0 0 1-.83 1.04l-1.85.32a8 8 0 0 1-2.2 1.27l-.95 1.65a1 1 0 0 1-1.37.36L12 23.34l-1.62.94a1 1 0 0 1-1.37-.36l-.95-1.65a8 8 0 0 1-2.2-1.27l-1.85-.32a1 1 0 0 1-.83-1.04l.07-1.9a8 8 0 0 1-1.27-2.2L.33 14.6a1 1 0 0 1-.36-1.37L.91 11.6.97 9.7l-.04-.05a1 1 0 0 1 .36-1.37l1.65-.95a8 8 0 0 1 1.27-2.2L4.14 3.23a1 1 0 0 1 .83-1.04l1.85-.32A8 8 0 0 1 9.02.6L9.97-1.05a1 1 0 0 1 1.37-.36l1.6.93 1.7.03a1 1 0 0 1 1.04.83l.32 1.85a8 8 0 0 1 2.2 1.27l1.9-.07a1 1 0 0 1 1.04.83l.32 1.85a8 8 0 0 1 1.27 2.2l1.65.95a1 1 0 0 1 .36 1.37L21.4 12Z" />
-        </svg>
-      </button>
+      <div class="header-right">
+        <div class="status-pill" id="status-pill" hidden>
+          <span class="dot"></span>
+          <span class="status-pill-text">Disconnected</span>
+        </div>
+      </div>
     </header>
 
     <!-- Auth view (signed-out) -->
     <section id="view-auth" class="view hidden">
       <div class="hero">
         <img class="hero-orb" src="icons/icon-128.png" alt="" width="64" height="64" />
-        <h1 class="hero-title">Sign in to connect</h1>
-        <p class="hero-sub">Use the same account as the website or mobile app.</p>
+        <h1 class="hero-title">Welcome back</h1>
+        <p class="hero-sub">Sign in with your SecurePaid account</p>
       </div>
       <form id="login-form" class="form">
-        <label class="field">
+        <div class="field">
           <span class="field-label">Email</span>
-          <input type="email" id="login-email" autocomplete="email" required />
-        </label>
-        <label class="field">
+          <span class="field-input">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" required />
+          </span>
+        </div>
+        <div class="field">
           <span class="field-label">Password</span>
-          <input type="password" id="login-password" autocomplete="current-password" required minlength="8" />
-        </label>
+          <span class="field-input">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required minlength="8" />
+          </span>
+        </div>
         <div id="login-error" class="form-error" role="alert"></div>
-        <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
-        <button type="button" class="btn btn-ghost" id="show-signup">Create account</button>
+        <button type="submit" class="btn btn-primary" id="login-submit">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+          <span class="btn-label">Sign in</span>
+        </button>
+        <button type="button" class="btn btn-ghost" id="show-signup">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
+          <span class="btn-label">Create account</span>
+        </button>
         <a href="#" class="link" id="forgot-link">Forgot password?</a>
       </form>
 
       <form id="signup-form" class="form hidden">
-        <label class="field">
+        <div class="field">
           <span class="field-label">Name</span>
-          <input type="text" id="signup-name" autocomplete="name" required />
-        </label>
-        <label class="field">
+          <span class="field-input">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-7 8-7s8 3 8 7"/></svg>
+            <input type="text" id="signup-name" placeholder="Your name" autocomplete="name" required />
+          </span>
+        </div>
+        <div class="field">
           <span class="field-label">Email</span>
-          <input type="email" id="signup-email" autocomplete="email" required />
-        </label>
-        <label class="field">
+          <span class="field-input">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+            <input type="email" id="signup-email" placeholder="you@example.com" autocomplete="email" required />
+          </span>
+        </div>
+        <div class="field">
           <span class="field-label">Password</span>
-          <input type="password" id="signup-password" autocomplete="new-password" required minlength="8" />
+          <span class="field-input">
+            <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+            <input type="password" id="signup-password" placeholder="At least 8 characters" autocomplete="new-password" required minlength="8" />
+          </span>
           <span class="field-hint">8 characters minimum</span>
-        </label>
+        </div>
         <div id="signup-error" class="form-error" role="alert"></div>
-        <button type="submit" class="btn btn-primary" id="signup-submit">Create account</button>
-        <button type="button" class="btn btn-ghost" id="show-login">Back to sign in</button>
+        <button type="submit" class="btn btn-primary" id="signup-submit">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
+          <span class="btn-label">Create account</span>
+        </button>
+        <button type="button" class="btn btn-ghost" id="show-login">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span class="btn-label">Back to sign in</span>
+        </button>
       </form>
     </section>
 
@@ -70,43 +102,181 @@
         <p class="hero-sub">Choose a plan to start protecting your browser traffic.</p>
       </div>
       <div class="actions stack">
-        <button id="open-pricing" class="btn btn-primary">View plans</button>
-        <button id="locked-refresh" class="btn btn-ghost">I just subscribed — refresh</button>
+        <button id="open-pricing" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l2.4 7.4H22l-6 4.6L18.4 22 12 17.4 5.6 22l2.4-8L2 9.4h7.6z"/></svg>
+          <span class="btn-label">View plans</span>
+        </button>
+        <button id="locked-refresh" class="btn btn-ghost">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0115.5-6.4M21 4v6h-6M21 12a9 9 0 01-15.5 6.4M3 20v-6h6"/></svg>
+          <span class="btn-label">I just subscribed — refresh</span>
+        </button>
         <button id="locked-logout" class="link link-danger">Sign out</button>
       </div>
     </section>
 
-    <!-- Main connect view -->
-    <section id="view-main" class="view hidden">
-      <div class="status-card" id="status-card">
-        <div class="status-pill" id="status-pill">
-          <span class="dot"></span>
-          <span class="status-pill-text">Disconnected</span>
+    <!-- Main view: tabbed (Home / Locations / Premium / Settings) -->
+    <section id="view-main" class="view view-main hidden">
+      <!-- Home tab -->
+      <div class="tab-pane" data-tab="home">
+        <div class="connect-area">
+          <button id="connect-btn" class="connect-orb" disabled>
+            <span class="connect-aura"></span>
+            <span class="connect-ring connect-ring-1"></span>
+            <span class="connect-ring connect-ring-2"></span>
+            <span class="connect-bezel">
+              <span class="connect-orb-inner">
+                <svg class="connect-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2v10"/>
+                  <path d="M18.4 6.6a9 9 0 11-12.8 0"/>
+                </svg>
+                <span class="connect-label">Tap to Connect</span>
+              </span>
+            </span>
+          </button>
         </div>
-        <div class="status-server" id="status-server">
+
+        <button class="server-picker" id="server-picker" data-go-tab="locations">
           <span class="status-flag" id="status-flag">🌐</span>
-          <div class="status-meta">
-            <div class="status-name" id="status-name">No location selected</div>
-            <div class="status-sub" id="status-sub">Choose a server below</div>
+          <span class="picker-meta">
+            <span class="picker-eyebrow">Selected Location</span>
+            <span class="picker-city" id="status-name">No location selected</span>
+            <span class="picker-sub" id="status-sub">Tap to choose a server</span>
+          </span>
+          <svg class="picker-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-icon stat-icon--gold">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            </span>
+            <span class="stat-label">Uptime</span>
+            <span class="stat-value" id="stat-uptime">00:00:00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-icon stat-icon--gold">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg>
+            </span>
+            <span class="stat-label">Virtual IP</span>
+            <span class="stat-value" id="stat-ip">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-icon stat-icon--success">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+            </span>
+            <span class="stat-label">Protocol</span>
+            <span class="stat-value" id="stat-protocol">HTTPS</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-icon stat-icon--warning">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="14" r="4"/><path d="M11 14l9-9M16 7l3 3M19 4l3 3"/></svg>
+            </span>
+            <span class="stat-label">Auth</span>
+            <span class="stat-value" id="stat-auth">Basic</span>
           </div>
         </div>
-        <button id="connect-btn" class="connect-pill" disabled>
-          <span class="connect-halo"></span>
-          <span class="connect-label">Connect</span>
-        </button>
+
         <div class="status-error" id="status-error" hidden></div>
       </div>
 
-      <div class="server-list-header">
-        <span>Servers</span>
-        <button id="refresh-servers" class="link" title="Refresh server list">Refresh</button>
+      <!-- Locations tab -->
+      <div class="tab-pane hidden" data-tab="locations">
+        <div class="locations-header">
+          <h2 class="pane-title">Server Locations</h2>
+          <p class="pane-sub" id="locations-sub">— servers</p>
+        </div>
+        <div class="search-input">
+          <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="search" id="server-search" placeholder="Search country or city" />
+        </div>
+        <ul class="server-list" id="server-list" aria-label="VPN server list"></ul>
+        <button id="refresh-servers" class="link refresh-link" title="Refresh server list">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0115.5-6.4M21 4v6h-6"/></svg>
+          Refresh list
+        </button>
       </div>
-      <ul class="server-list" id="server-list" aria-label="VPN server list"></ul>
 
-      <footer class="footer">
-        <span class="footer-user" id="footer-user"></span>
-        <button id="footer-settings" class="link">Settings</button>
-      </footer>
+      <!-- Premium tab -->
+      <div class="tab-pane hidden" data-tab="premium">
+        <div class="pane-head">
+          <h2 class="pane-title">Premium</h2>
+          <p class="pane-sub">Manage your SecurePaid subscription.</p>
+        </div>
+        <div class="info-card">
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-value premium-active" id="premium-status">Active</span>
+          </div>
+          <div class="info-row" id="premium-plan-row">
+            <span class="info-label">Plan</span>
+            <span class="info-value" id="premium-plan">—</span>
+          </div>
+          <div class="info-row" id="premium-renew-row">
+            <span class="info-label">Renews</span>
+            <span class="info-value" id="premium-renew">—</span>
+          </div>
+        </div>
+        <button id="manage-billing" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+          <span class="btn-label">Manage billing</span>
+        </button>
+        <button id="open-pricing-main" class="btn btn-ghost">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l2.4 7.4H22l-6 4.6L18.4 22 12 17.4 5.6 22l2.4-8L2 9.4h7.6z"/></svg>
+          <span class="btn-label">View all plans</span>
+        </button>
+      </div>
+
+      <!-- Settings tab -->
+      <div class="tab-pane hidden" data-tab="settings">
+        <div class="pane-head">
+          <h2 class="pane-title">Settings</h2>
+          <p class="pane-sub" id="settings-user">—</p>
+        </div>
+        <button class="setting-row" id="open-options">
+          <span class="setting-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </span>
+          <span class="setting-label">Advanced options</span>
+          <svg class="setting-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <button class="setting-row" id="open-help">
+          <span class="setting-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.6" fill="currentColor"/></svg>
+          </span>
+          <span class="setting-label">Help &amp; support</span>
+          <svg class="setting-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+        <button class="setting-row setting-row--danger" id="settings-logout">
+          <span class="setting-icon">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+          </span>
+          <span class="setting-label">Sign out</span>
+        </button>
+      </div>
+
+      <!-- Bottom tab bar (mirrors mobile app/(tabs)/_layout.js) -->
+      <nav class="tab-bar" role="tablist">
+        <button class="tab-btn is-active" data-tab="home" role="tab" aria-selected="true">
+          <span class="tab-indicator"></span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 7v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7l-8-5z"/><path d="M12 2v20"/></svg>
+          <span class="tab-label">Home</span>
+        </button>
+        <button class="tab-btn" data-tab="locations" role="tab" aria-selected="false">
+          <span class="tab-indicator"></span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/></svg>
+          <span class="tab-label">Locations</span>
+        </button>
+        <button class="tab-btn" data-tab="premium" role="tab" aria-selected="false">
+          <span class="tab-indicator"></span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l2.4 7.4H22l-6 4.6L18.4 22 12 17.4 5.6 22l2.4-8L2 9.4h7.6z"/></svg>
+          <span class="tab-label">Premium</span>
+        </button>
+        <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">
+          <span class="tab-indicator"></span>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="tab-label">Settings</span>
+        </button>
+      </nav>
     </section>
 
     <!-- Boot/loading -->

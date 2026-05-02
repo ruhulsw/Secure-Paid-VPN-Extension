@@ -73,15 +73,38 @@
   }
 
   function clearProxyChromium() {
-    // Set mode:'direct' and STAY in control. Calling settings.clear()
-    // would merely release our policy hold, letting any underlying
-    // proxy (another extension, MDM policy, OS network proxy, stale
-    // PAC) take over — that's the bug where "Disconnect didn't
-    // disconnect" came from.
+    // Three steps. The dead-end step is what makes Disconnect actually
+    // disconnect — without it, Chrome happily reuses keep-alive sockets
+    // to the old proxy host even after mode:direct is in effect, which
+    // is what produced the user-reported "still routing through the
+    // VPN after Disconnect" / 407 errors.
     //
-    // After setting, *verify* with settings.get() and retry once if
-    // we're somehow still in fixed_servers mode. Logs the result so
-    // you can see in the SW DevTools console exactly what happened.
+    // 1. Switch to a deliberate dead-end proxy (loopback unused port).
+    //    This invalidates Chrome's cached proxy decisions and tears
+    //    down existing TCP connections to the real proxy host. Any
+    //    in-flight requests fail with ERR_PROXY_CONNECTION_FAILED for
+    //    a moment — a short, intentional outage to force a clean slate.
+    // 2. Switch to mode:'direct'. New requests go straight to the
+    //    real internet, no proxy.
+    // 3. Verify settings.get() reports 'direct'. Retry once if not.
+    function applyDeadEnd() {
+      return new Promise(function (resolve) {
+        try {
+          BX.proxy.settings.set({
+            value: {
+              mode: 'fixed_servers',
+              rules: { singleProxy: { scheme: 'http', host: '127.0.0.1', port: 1 } },
+            },
+            scope: 'regular',
+          }, function () {
+            // Don't reject on lastError — best-effort. If the dead-end
+            // didn't take, the direct step still runs.
+            resolve();
+          });
+        } catch (_) { resolve(); }
+      });
+    }
+
     function applyDirect() {
       return new Promise(function (resolve, reject) {
         try {
@@ -123,7 +146,7 @@
       } catch (_) { /* ignore */ }
     }
 
-    return applyDirect().then(verifyDirect).then(function (ok) {
+    return applyDeadEnd().then(applyDirect).then(verifyDirect).then(function (ok) {
       if (ok) { flushHandlerCache(); return; }
       console.warn('[proxy] direct mode did NOT take effect after first try, retrying');
       return applyDirect().then(verifyDirect).then(function (ok2) {
@@ -296,6 +319,17 @@
   // The browser fires onAuthRequired when the proxy challenges for creds.
   // For SOCKS5 + user/pass auth (RFC 1929) Chromium and Firefox both route
   // the challenge through this same hook, so a single listener covers both.
+  var authListenerFn = null;
+
+  function uninstallAuthListener() {
+    if (!BX.webRequest || !BX.webRequest.onAuthRequired) return;
+    if (!authListenerFn) return;
+    try { BX.webRequest.onAuthRequired.removeListener(authListenerFn); } catch (_) {}
+    authListenerFn = null;
+    installAuthListener._installed = false;
+    console.log('[proxy] onAuthRequired listener uninstalled');
+  }
+
   function installAuthListener() {
     if (!BX.webRequest || !BX.webRequest.onAuthRequired) {
       console.warn('[proxy] webRequest.onAuthRequired unavailable');
@@ -305,7 +339,7 @@
     installAuthListener._installed = true;
 
     var extraInfoSpec = ['asyncBlocking'];
-    BX.webRequest.onAuthRequired.addListener(
+    authListenerFn =
       function (details, asyncCallback) {
         // Verbose log so we can confirm whether Chrome actually fires this
         // hook for SOCKS5 user/pass auth. There's an open question about
@@ -357,7 +391,9 @@
           console.error('[proxy] storage load failed inside auth listener', e);
           if (asyncCallback) asyncCallback({});
         });
-      },
+      };
+    BX.webRequest.onAuthRequired.addListener(
+      authListenerFn,
       { urls: ['<all_urls>'] },
       extraInfoSpec
     );
@@ -374,6 +410,12 @@
     },
     clear: function () {
       setActiveCredentials(null);
+      // Removing the auth listener BEFORE switching the proxy means
+      // any in-flight onAuthRequired event for the dying connection
+      // resolves through Chrome's default path (silent fail) instead
+      // of our extension responding. No more 407 splash pages from
+      // returning cancel:true on a connection we no longer care about.
+      uninstallAuthListener();
       return BX.isFirefox ? clearProxyFirefox() : clearProxyChromium();
     },
     installAuthListener: installAuthListener,
