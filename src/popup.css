@@ -23,9 +23,12 @@
   --warning: #f5b265;
   --danger: #f78a8a;
 
-  --tab-bar-height: 58px;
-  --header-height: 60px;
-  --popup-height: 640px;
+  /* Chrome caps popup height around 600px on most platforms — 640
+     was getting the bottom of the tab bar clipped. 580 gives us a
+     comfortable safety margin without scroll. */
+  --tab-bar-height: 56px;
+  --header-height: 58px;
+  --popup-height: 580px;
 }
 
 * { box-sizing: border-box; }
@@ -397,13 +400,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 8px 0 14px;
+  margin: 4px 0 10px;
 }
 
 .connect-orb {
   position: relative;
-  width: 180px;
-  height: 180px;
+  width: 150px;
+  height: 150px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -452,8 +455,8 @@ body {
 
 .connect-bezel {
   position: relative;
-  width: 176px;
-  height: 176px;
+  width: 146px;
+  height: 146px;
   border-radius: 50%;
   background: linear-gradient(135deg,
     rgba(255,255,255,0.18),
@@ -475,8 +478,8 @@ body {
 
 .connect-orb-inner {
   position: relative;
-  width: 172px;
-  height: 172px;
+  width: 142px;
+  height: 142px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--surface-alt), var(--bg-deep) 60%, #06060a);
   border: 1px solid rgba(255,255,255,0.05);
@@ -500,8 +503,8 @@ body {
 }
 
 .connect-icon {
-  width: 50px;
-  height: 50px;
+  width: 42px;
+  height: 42px;
   color: var(--text);
   filter: drop-shadow(0 0 6px rgba(255,255,255,0.18));
   z-index: 1;
@@ -584,24 +587,24 @@ body {
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
+  padding: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   min-width: 0;
 }
 
 .stat-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
