@@ -8,12 +8,14 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var els = {
+    root:        document.getElementById('root'),
     viewAuth:    $('view-auth'),
     viewLocked:  $('view-locked'),
     viewMain:    $('view-main'),
     viewLoading: $('view-loading'),
 
     settingsBtn: $('settings-btn'),
+    brandSub:    $('brand-sub'),
 
     loginForm:     $('login-form'),
     loginEmail:    $('login-email'),
@@ -35,8 +37,8 @@
     lockedRefresh: $('locked-refresh'),
     lockedLogout:  $('locked-logout'),
 
-    statusCard:   $('status-card'),
     statusPill:   $('status-pill'),
+    serverPicker: $('server-picker'),
     statusFlag:   $('status-flag'),
     statusName:   $('status-name'),
     statusSub:    $('status-sub'),
@@ -81,6 +83,13 @@
           : name === 'main' ? els.viewMain
           : els.viewLoading;
     v.classList.remove('hidden');
+
+    // Header chrome — only show StatusPill + Premium subtitle on the
+    // main connect view. Auth/locked/loading views hide them so the
+    // header stays a clean brand block (mirrors mobile app behaviour).
+    var isMain = name === 'main';
+    els.statusPill.hidden = !isMain;
+    els.brandSub.hidden   = !isMain || !(state && state.isPremium);
   }
 
   function render() {
@@ -112,24 +121,28 @@
                 || (conn.status === 'connected' ? conn.server : null);
 
     var status = conn.status || 'disconnected';
-    els.statusCard.dataset.status = status;
+    els.root.dataset.status = status;
 
     els.statusPill.querySelector('.status-pill-text').textContent =
-      status === 'connecting' ? 'Connecting…'
+      status === 'connecting' ? 'Connecting'
       : status === 'connected' ? 'Protected'
+      : status === 'disconnecting' ? 'Disconnecting'
       : status === 'error' ? 'Error'
-      : 'Disconnected';
+      : 'Not Connected';
 
     if (selected) {
       els.statusFlag.textContent = selected.flag || flagEmoji(selected.countryCode) || '🌐';
-      els.statusName.textContent = selected.country || 'Server';
-      els.statusSub.textContent  = selected.city
-        ? selected.city + (typeof selected.pingMs === 'number' && selected.pingMs > 0 ? ' · ' + selected.pingMs + ' ms' : '')
+      // Picker shows "City, Country" like the mobile app's server-picker.
+      var city = selected.city || '';
+      var country = selected.country || 'Server';
+      els.statusName.textContent = city ? (city + ', ' + country) : country;
+      els.statusSub.textContent  = (typeof selected.pingMs === 'number' && selected.pingMs > 0)
+        ? (selected.pingMs + ' ms · ' + (selected.host || ''))
         : (selected.host || '');
     } else {
       els.statusFlag.textContent = '🌐';
-      els.statusName.textContent = 'No location selected';
-      els.statusSub.textContent  = 'Choose a server below';
+      els.statusName.textContent = 'Choose a location';
+      els.statusSub.textContent  = 'Pick a server from the list below';
     }
 
     var btnLabel = status === 'connected' ? 'Tap to Disconnect'
