@@ -338,8 +338,15 @@
         // Promise — Chrome holds the connection open in the meantime.
         loadActiveCredentialsFromStorage().then(function (loaded) {
           if (!loaded) {
-            console.warn('[proxy] proxy auth requested but no creds in storage — cancelling');
-            if (asyncCallback) asyncCallback({ cancel: true });
+            // No credentials available means we've already been
+            // disconnected. Returning `cancel:true` here surfaces an
+            // explicit HTTP 407 in the user's tab, which is worse
+            // than letting Chrome handle the missing auth itself.
+            // Returning `{}` (no credentials) lets Chrome close the
+            // connection naturally; the next request on that origin
+            // will go via mode:'direct' and bypass the proxy entirely.
+            console.warn('[proxy] proxy auth requested but no creds — letting Chrome drop the connection');
+            if (asyncCallback) asyncCallback({});
             return;
           }
           console.log('[proxy] supplying creds (loaded from storage) for', loaded.username);
@@ -348,7 +355,7 @@
           }
         }).catch(function (e) {
           console.error('[proxy] storage load failed inside auth listener', e);
-          if (asyncCallback) asyncCallback({ cancel: true });
+          if (asyncCallback) asyncCallback({});
         });
       },
       { urls: ['<all_urls>'] },

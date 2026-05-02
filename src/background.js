@@ -163,8 +163,6 @@
     var clearError = null;
     return ProxyCtl.clear()
       .catch(function (err) {
-        // Don't swallow silently — log the actual reason so it's
-        // visible in the SW DevTools and surface it to the popup.
         console.error('[bg] disconnect: ProxyCtl.clear failed:', err && err.message, err);
         clearError = err;
       })
@@ -182,12 +180,40 @@
       .then(function () {
         setBadge(clearError ? '!' : '', clearError ? '#f78a8a' : '#000000');
         broadcastState();
+
+        // Force-reload http(s) tabs so they drop any keep-alive socket
+        // they had established to the now-disconnected proxy host. This
+        // is the only reliable way — Chrome doesn't expose an API to
+        // close existing TCP connections, and proxy.settings.set only
+        // affects NEW sockets. Without this, requests on long-lived
+        // tabs continued routing through the dead proxy and surfaced
+        // as HTTP 407 errors. Skip on 'logout' / 'subscription-expired'
+        // teardowns where the user's already going somewhere else.
+        if (!clearError && (reason === 'user' || reason == null)) {
+          reloadHttpTabs();
+        }
+
         if (clearError) {
           notify('Disconnect failed', 'Browser may still be using the VPN. Reload your tabs.');
         } else if (!reason || reason === 'user') {
           notify('Disconnected', 'Browser is now using its direct connection.');
         }
       });
+  }
+
+  function reloadHttpTabs() {
+    if (!BX.tabs || typeof BX.tabs.query !== 'function') return;
+    try {
+      BX.tabs.query({}, function (tabs) {
+        (tabs || []).forEach(function (t) {
+          if (!t || !t.id || t.discarded) return;
+          if (!t.url || !/^https?:\/\//i.test(t.url)) return;
+          try { BX.tabs.reload(t.id, { bypassCache: false }); } catch (_) {}
+        });
+      });
+    } catch (e) {
+      console.warn('[bg] reloadHttpTabs failed:', e);
+    }
   }
 
   function broadcastState() {
