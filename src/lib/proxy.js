@@ -73,12 +73,28 @@
   }
 
   function clearProxyChromium() {
+    // Two-step: set mode:'direct' first (forces ALL traffic to bypass any
+    // proxy immediately), THEN clear our control of the setting. Calling
+    // clear() alone is unreliable — Chrome interprets it as "release my
+    // policy hold" rather than "send traffic direct", and depending on
+    // levelOfControl + cached PAC results, some connections continue
+    // routing through the dead proxy host until tabs reload. Setting
+    // direct guarantees the browser stops using our proxy on the next
+    // outbound socket. clear() afterwards lets system/user settings
+    // resume control if they exist.
     return new Promise(function (resolve, reject) {
       try {
-        BX.proxy.settings.clear({ scope: 'regular' }, function () {
-          var lastErr = BX.raw.runtime && BX.raw.runtime.lastError;
-          if (lastErr) return reject(new Error(lastErr.message));
-          resolve();
+        BX.proxy.settings.set({ value: { mode: 'direct' }, scope: 'regular' }, function () {
+          var setErr = BX.raw.runtime && BX.raw.runtime.lastError;
+          if (setErr) {
+            console.warn('[proxy] settings.set(direct) failed:', setErr.message);
+            // Fall through to clear() — better than nothing.
+          }
+          BX.proxy.settings.clear({ scope: 'regular' }, function () {
+            var clrErr = BX.raw.runtime && BX.raw.runtime.lastError;
+            if (clrErr) return reject(new Error(clrErr.message));
+            resolve();
+          });
         });
       } catch (e) { reject(e); }
     });

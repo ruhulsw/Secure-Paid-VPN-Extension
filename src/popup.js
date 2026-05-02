@@ -1,6 +1,9 @@
 // Popup controller. Talks to background.js exclusively via runtime messages
 // — keeps the popup a pure render-and-event surface so closing it doesn't
 // drop in-flight work.
+//
+// Layout mirrors the React Native mobile app: tabbed Home / Locations /
+// Premium / Settings, single header chrome.
 
 (function () {
   'use strict';
@@ -8,15 +11,15 @@
   var $ = function (id) { return document.getElementById(id); };
 
   var els = {
-    root:        document.getElementById('root'),
+    root:        $('root'),
     viewAuth:    $('view-auth'),
     viewLocked:  $('view-locked'),
     viewMain:    $('view-main'),
     viewLoading: $('view-loading'),
-
-    settingsBtn: $('settings-btn'),
     brandSub:    $('brand-sub'),
+    statusPill:  $('status-pill'),
 
+    // Auth
     loginForm:     $('login-form'),
     loginEmail:    $('login-email'),
     loginPassword: $('login-password'),
@@ -24,7 +27,6 @@
     loginSubmit:   $('login-submit'),
     showSignup:    $('show-signup'),
     forgotLink:    $('forgot-link'),
-
     signupForm:     $('signup-form'),
     signupName:     $('signup-name'),
     signupEmail:    $('signup-email'),
@@ -33,24 +35,48 @@
     signupSubmit:   $('signup-submit'),
     showLogin:      $('show-login'),
 
+    // Locked
     openPricing:   $('open-pricing'),
     lockedRefresh: $('locked-refresh'),
     lockedLogout:  $('locked-logout'),
 
-    statusPill:   $('status-pill'),
+    // Main / Home tab
     serverPicker: $('server-picker'),
     statusFlag:   $('status-flag'),
     statusName:   $('status-name'),
     statusSub:    $('status-sub'),
     connectBtn:   $('connect-btn'),
     statusError:  $('status-error'),
-    serverList:   $('server-list'),
-    refreshServers: $('refresh-servers'),
-    footerUser:   $('footer-user'),
-    footerSettings: $('footer-settings'),
+
+    // Locations tab
+    locationsSub:  $('locations-sub'),
+    serverSearch:  $('server-search'),
+    serverList:    $('server-list'),
+    refreshServers:$('refresh-servers'),
+
+    // Premium tab
+    premiumStatus:  $('premium-status'),
+    premiumPlan:    $('premium-plan'),
+    premiumPlanRow: $('premium-plan-row'),
+    premiumRenew:   $('premium-renew'),
+    premiumRenewRow:$('premium-renew-row'),
+    manageBilling:  $('manage-billing'),
+    openPricingMain:$('open-pricing-main'),
+
+    // Settings tab
+    settingsUser: $('settings-user'),
+    openOptions:  $('open-options'),
+    openHelp:     $('open-help'),
+    settingsLogout:$('settings-logout'),
+
+    // Tabs
+    tabBtns:  document.querySelectorAll('.tab-btn'),
+    tabPanes: document.querySelectorAll('.tab-pane'),
   };
 
   var state = null;
+  var activeTab = 'home';
+  var searchQuery = '';
 
   // ---- Messaging ---------------------------------------------------------
 
@@ -84,12 +110,21 @@
           : els.viewLoading;
     v.classList.remove('hidden');
 
-    // Header chrome — only show StatusPill + Premium subtitle on the
-    // main connect view. Auth/locked/loading views hide them so the
-    // header stays a clean brand block (mirrors mobile app behaviour).
     var isMain = name === 'main';
     els.statusPill.hidden = !isMain;
     els.brandSub.hidden   = !isMain || !(state && state.isPremium);
+  }
+
+  function setActiveTab(name) {
+    activeTab = name;
+    els.tabPanes.forEach(function (p) {
+      p.classList.toggle('hidden', p.dataset.tab !== name);
+    });
+    els.tabBtns.forEach(function (b) {
+      var on = b.dataset.tab === name;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
   }
 
   function render() {
@@ -132,17 +167,16 @@
 
     if (selected) {
       els.statusFlag.textContent = selected.flag || flagEmoji(selected.countryCode) || '🌐';
-      // Picker shows "City, Country" like the mobile app's server-picker.
       var city = selected.city || '';
       var country = selected.country || 'Server';
       els.statusName.textContent = city ? (city + ', ' + country) : country;
       els.statusSub.textContent  = (typeof selected.pingMs === 'number' && selected.pingMs > 0)
         ? (selected.pingMs + ' ms · ' + (selected.host || ''))
-        : (selected.host || '');
+        : (selected.host || 'Tap to change');
     } else {
       els.statusFlag.textContent = '🌐';
       els.statusName.textContent = 'Choose a location';
-      els.statusSub.textContent  = 'Pick a server from the list below';
+      els.statusSub.textContent  = 'Tap to pick a server';
     }
 
     var btnLabel = status === 'connected' ? 'Tap to Disconnect'
@@ -154,9 +188,6 @@
 
     if (status === 'error' && conn.error) {
       els.statusError.hidden = false;
-      // Distinguish the generic browser fetch failure from real backend
-      // messages so a user (or operator) can tell whether the connect
-      // got rejected vs. simply couldn't reach the network.
       var detail = conn.error;
       if (conn.errorName === 'TypeError' || /failed to fetch/i.test(conn.error || '')) {
         detail = 'Couldn’t reach the API (' + conn.error + '). Check your network and try again.';
@@ -171,8 +202,51 @@
       els.statusError.textContent = '';
     }
 
-    renderServerList(servers, selectedId, conn);
-    els.footerUser.textContent = (state.user && state.user.email) || '';
+    // Locations tab — list with optional search filter
+    var filteredServers = filterServers(servers, searchQuery);
+    if (els.locationsSub) {
+      els.locationsSub.textContent = servers.length
+        ? servers.length + ' server' + (servers.length === 1 ? '' : 's') + ' across the globe'
+        : 'No servers available';
+    }
+    renderServerList(filteredServers, selectedId, conn);
+
+    // Premium tab
+    var sub = state.subscription || {};
+    if (els.premiumStatus) {
+      els.premiumStatus.textContent = sub.status || 'Active';
+      els.premiumStatus.className = 'info-value premium-active';
+    }
+    if (els.premiumPlan) {
+      var planName = sub.plan || sub.planName || sub.priceId || '';
+      els.premiumPlan.textContent = planName || 'Premium';
+      els.premiumPlanRow.hidden = false;
+    }
+    if (els.premiumRenew) {
+      var renew = sub.currentPeriodEnd || sub.renewsAt || sub.nextBillingDate;
+      if (renew) {
+        var d = new Date(renew * (typeof renew === 'number' && renew < 1e12 ? 1000 : 1));
+        els.premiumRenew.textContent = isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+        els.premiumRenewRow.hidden = false;
+      } else {
+        els.premiumRenewRow.hidden = true;
+      }
+    }
+
+    // Settings tab — show user email
+    if (els.settingsUser) {
+      els.settingsUser.textContent = (state.user && state.user.email) || '';
+    }
+  }
+
+  function filterServers(servers, q) {
+    if (!q || !q.trim()) return servers;
+    var query = q.trim().toLowerCase();
+    return servers.filter(function (s) {
+      return (s.country || '').toLowerCase().indexOf(query) !== -1
+          || (s.city    || '').toLowerCase().indexOf(query) !== -1
+          || (s.countryCode || '').toLowerCase().indexOf(query) !== -1;
+    });
   }
 
   // DOM-construction (no innerHTML) — Mozilla's reviewers flag dynamic
@@ -220,7 +294,7 @@
     if (!servers.length) {
       var empty = document.createElement('li');
       empty.className = 'server-row server-row--empty';
-      empty.textContent = 'No servers available yet.';
+      empty.textContent = searchQuery ? 'No matches.' : 'No servers available yet.';
       els.serverList.appendChild(empty);
       return;
     }
@@ -240,6 +314,30 @@
 
   // ---- Event wiring ------------------------------------------------------
 
+  // Tab switching
+  els.tabBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      setActiveTab(btn.dataset.tab);
+    });
+  });
+
+  // Server picker on Home tab → jump to Locations tab
+  if (els.serverPicker) {
+    els.serverPicker.addEventListener('click', function () {
+      setActiveTab('locations');
+      setTimeout(function () { els.serverSearch && els.serverSearch.focus(); }, 50);
+    });
+  }
+
+  // Search filter
+  if (els.serverSearch) {
+    els.serverSearch.addEventListener('input', function (e) {
+      searchQuery = e.target.value;
+      if (state) renderMain();
+    });
+  }
+
+  // Auth — toggle login/signup
   els.showSignup.addEventListener('click', function () {
     els.loginForm.classList.add('hidden');
     els.signupForm.classList.remove('hidden');
@@ -301,38 +399,67 @@
     send('logout').then(refresh);
   });
 
+  // Connect / disconnect — disconnect MUST work even when status === 'connecting'
+  // so users can cancel a stuck attempt.
   els.connectBtn.addEventListener('click', function () {
     if (!state) return;
     var conn = state.connection || { status: 'disconnected' };
-    if (conn.status === 'connected' || conn.status === 'connecting') {
-      send('disconnect').then(refresh).catch(function () {});
+    if (conn.status === 'connected' || conn.status === 'connecting' || conn.status === 'disconnecting') {
+      send('disconnect').then(refresh).catch(function () { refresh(); });
       return;
     }
     var id = state.selectedServerId || (state.servers[0] && state.servers[0].id);
-    if (!id) return;
+    if (!id) {
+      setActiveTab('locations');
+      return;
+    }
     send('connect', { serverId: id }).catch(function () {}).then(refresh);
   });
 
   els.serverList.addEventListener('click', function (e) {
     var row = e.target.closest('.server-row');
     if (!row || !row.dataset.id) return;
-    send('select-server', { serverId: row.dataset.id }).then(refresh);
+    send('select-server', { serverId: row.dataset.id }).then(function () {
+      // After picking, jump back to Home so the user sees the new selection.
+      return refresh().then(function () { setActiveTab('home'); });
+    });
   });
 
   els.refreshServers.addEventListener('click', function () {
     send('refresh-servers').then(refresh).catch(function () {});
   });
 
-  els.settingsBtn.addEventListener('click', function () {
-    BX.runtime.openOptionsPage().catch(function () {});
-  });
-  els.footerSettings.addEventListener('click', function () {
-    BX.runtime.openOptionsPage().catch(function () {});
-  });
+  // Premium tab
+  if (els.manageBilling) {
+    els.manageBilling.addEventListener('click', function () {
+      send('open-portal').catch(function () {
+        send('open-page', { path: '/dashboard' }).catch(function () {});
+      });
+    });
+  }
+  if (els.openPricingMain) {
+    els.openPricingMain.addEventListener('click', function () {
+      send('open-page', { path: '/pricing' }).catch(function () {});
+    });
+  }
 
-  // Buttons now contain a leading SVG icon + a `.btn-label` span. Update
-  // only the span so the icon survives. Falls back to textContent for
-  // legacy buttons that don't yet have a `.btn-label`.
+  // Settings tab
+  if (els.openOptions) {
+    els.openOptions.addEventListener('click', function () {
+      BX.runtime.openOptionsPage().catch(function () {});
+    });
+  }
+  if (els.openHelp) {
+    els.openHelp.addEventListener('click', function () {
+      send('open-page', { path: '/help' }).catch(function () {});
+    });
+  }
+  if (els.settingsLogout) {
+    els.settingsLogout.addEventListener('click', function () {
+      send('logout').then(refresh);
+    });
+  }
+
   function setBusy(btn, busy, label) {
     btn.disabled = !!busy;
     if (label == null) return;
@@ -341,8 +468,6 @@
     else btn.textContent = label;
   }
 
-  // Live updates from the background — re-render whenever connection /
-  // premium state changes.
   BX.runtime.onMessage.addListener(function (msg) {
     if (msg && msg.type === 'state-changed') refresh();
   });
