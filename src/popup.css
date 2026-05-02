@@ -24,6 +24,8 @@
   --danger: #f78a8a;
 
   --tab-bar-height: 58px;
+  --header-height: 60px;
+  --popup-height: 640px;
 }
 
 * { box-sizing: border-box; }
@@ -41,15 +43,21 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-body { min-height: 600px; }
+body {
+  height: var(--popup-height);
+  min-height: var(--popup-height);
+  overflow: hidden;
+}
 
 #root {
   display: flex;
   flex-direction: column;
-  min-height: 600px;
+  height: var(--popup-height);
+  min-height: var(--popup-height);
   background:
     radial-gradient(ellipse at top, rgba(212, 160, 76, 0.06), transparent 60%),
     linear-gradient(180deg, var(--surface-alt), var(--bg) 280px);
+  overflow: hidden;
 }
 #root[data-status="connected"] {
   background:
@@ -166,23 +174,35 @@ body { min-height: 600px; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* ---- Views ------------------------------------------------------------- */
+/* Auth + Locked + Loading views: scroll independently when tall. */
 .view {
   flex: 1;
   display: flex;
   flex-direction: column;
   padding: 4px 18px 18px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
+/* Main view is the tab container — no scroll itself; each pane scrolls. */
 .view-main {
   padding: 0;
   position: relative;
+  overflow: hidden;
 }
-/* The tab panes get the inner padding; the bottom tab bar is full-bleed */
+
+/* Each tab pane scrolls inside the bounded popup height so the tab bar
+   stays anchored at the bottom regardless of content length. */
 .tab-pane {
-  flex: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: var(--tab-bar-height);
   display: flex;
   flex-direction: column;
-  padding: 6px 18px calc(var(--tab-bar-height) + 12px);
+  padding: 8px 18px 16px;
+  overflow-y: auto;
 }
 .tab-pane.hidden { display: none !important; }
 
@@ -670,9 +690,6 @@ body { min-height: 600px; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
 }
 
 .server-row {
@@ -827,10 +844,13 @@ body { min-height: 600px; }
 .tab-btn svg { transition: color 0.15s; }
 .tab-btn.is-active svg { color: var(--accent); }
 
-/* ---- Scrollbar -------------------------------------------------------- */
-.server-list::-webkit-scrollbar { width: 6px; }
-.server-list::-webkit-scrollbar-track { background: transparent; }
-.server-list::-webkit-scrollbar-thumb {
+/* ---- Scrollbar (auth view + each tab pane) --------------------------- */
+.view::-webkit-scrollbar,
+.tab-pane::-webkit-scrollbar { width: 6px; }
+.view::-webkit-scrollbar-track,
+.tab-pane::-webkit-scrollbar-track { background: transparent; }
+.view::-webkit-scrollbar-thumb,
+.tab-pane::-webkit-scrollbar-thumb {
   background: var(--surface-elev);
   border-radius: 999px;
 }

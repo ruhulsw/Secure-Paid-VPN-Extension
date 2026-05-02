@@ -73,28 +73,27 @@
   }
 
   function clearProxyChromium() {
-    // Two-step: set mode:'direct' first (forces ALL traffic to bypass any
-    // proxy immediately), THEN clear our control of the setting. Calling
-    // clear() alone is unreliable — Chrome interprets it as "release my
-    // policy hold" rather than "send traffic direct", and depending on
-    // levelOfControl + cached PAC results, some connections continue
-    // routing through the dead proxy host until tabs reload. Setting
-    // direct guarantees the browser stops using our proxy on the next
-    // outbound socket. clear() afterwards lets system/user settings
-    // resume control if they exist.
+    // CRITICAL: only set { mode: 'direct' } — do NOT also call
+    // settings.clear() afterwards.
+    //
+    // settings.clear() merely releases our extension's policy hold on
+    // the proxy. If anything else (another VPN extension, an MDM
+    // policy, the OS-level network proxy, even an old PAC URL) is
+    // configured at a lower priority, clear() lets THAT take over —
+    // and the browser keeps routing traffic through whatever was
+    // underneath. The user observes "I clicked Disconnect but the
+    // browser is still going through the VPN/proxy".
+    //
+    // By staying in control with mode:'direct', every outbound socket
+    // bypasses every proxy layer beneath us. This is what every other
+    // production VPN extension does. We give up the policy slot, but
+    // that's a non-cost (we'll re-claim it on the next connect).
     return new Promise(function (resolve, reject) {
       try {
         BX.proxy.settings.set({ value: { mode: 'direct' }, scope: 'regular' }, function () {
-          var setErr = BX.raw.runtime && BX.raw.runtime.lastError;
-          if (setErr) {
-            console.warn('[proxy] settings.set(direct) failed:', setErr.message);
-            // Fall through to clear() — better than nothing.
-          }
-          BX.proxy.settings.clear({ scope: 'regular' }, function () {
-            var clrErr = BX.raw.runtime && BX.raw.runtime.lastError;
-            if (clrErr) return reject(new Error(clrErr.message));
-            resolve();
-          });
+          var lastErr = BX.raw.runtime && BX.raw.runtime.lastError;
+          if (lastErr) return reject(new Error(lastErr.message));
+          resolve();
         });
       } catch (e) { reject(e); }
     });
