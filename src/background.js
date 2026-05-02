@@ -383,6 +383,18 @@
     ensureAlarm();
     ProxyCtl.installAuthListener();
     configureApi().then(function (cfg) {
+      // Clear any stale `error` connection status from a previous session.
+      // Without this the popup would keep surfacing yesterday's failure
+      // ("Couldn't reach the API…") long after the underlying issue is
+      // gone — the conn record persists in storage.local and is never
+      // overwritten until the next connect/disconnect.
+      Storage.getConnection().then(function (conn) {
+        if (conn && conn.status === 'error') {
+          return Storage.setConnection({ status: 'disconnected', at: Date.now() })
+            .then(function () { broadcastState(); });
+        }
+      }).catch(function () {});
+
       if (cfg.token) {
         // Re-issue the proxy if we were connected before the worker restart.
         // Chrome wipes proxy.settings when the SW dies, so we re-apply.

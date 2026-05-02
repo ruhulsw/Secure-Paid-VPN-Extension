@@ -124,6 +124,18 @@
   }
 
   function setProxyFirefox(proxy, bypassList) {
+    // Defensive: BX.isFirefox is just `typeof browser !== 'undefined'`,
+    // which can be true on Chromium variants that ship a `browser`
+    // polyfill (Edge with webextension-polyfill, some Brave builds).
+    // On those, `browser.proxy.onRequest` does NOT exist, and calling
+    // .addListener on it throws "Cannot read properties of undefined".
+    // Detect and fall through to the Chromium path instead.
+    if (!BX.raw || !BX.raw.proxy || !BX.raw.proxy.onRequest ||
+        typeof BX.raw.proxy.onRequest.addListener !== 'function') {
+      console.warn('[proxy] firefox path unavailable (proxy.onRequest missing); using chromium path');
+      return setProxyChromium(proxy, bypassList);
+    }
+
     var pacType = (proxy.type || 'https').toLowerCase();
     if (pacType === 'socks5') pacType = 'socks';
     if (pacType === 'socks4') pacType = 'socks4';
