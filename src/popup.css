@@ -57,16 +57,14 @@ body {
   flex-direction: column;
   height: var(--popup-height);
   min-height: var(--popup-height);
-  background:
-    radial-gradient(ellipse at top, rgba(212, 160, 76, 0.06), transparent 60%),
-    linear-gradient(180deg, var(--surface-alt), var(--bg) 280px);
+  background: linear-gradient(180deg, var(--surface-alt), var(--bg) 280px);
   overflow: hidden;
 }
-#root[data-status="connected"] {
-  background:
-    radial-gradient(ellipse at top, rgba(212, 160, 76, 0.12), transparent 55%),
-    linear-gradient(180deg, var(--surface), var(--bg) 280px);
-}
+/* Connected-state ambience used to add a top-anchored gold radial
+   gradient over the whole popup. It made the header look like the
+   orb's halo was bleeding upward into the brand + status pill area.
+   Drop it — the orb's own gold bezel + pulse rings are enough
+   ambience for "you're connected", and the chrome stays neutral. */
 
 .hidden { display: none !important; }
 
