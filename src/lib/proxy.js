@@ -380,12 +380,6 @@
   }
 
   function installAuthListener() {
-    // Firefox doesn't need this hook: ProxyInfo.{username,password} in the
-    // proxy.onRequest return value is sent inline. The auth-required path
-    // only fires for HTTP-layer 407s, which a correctly configured SOCKS5
-    // proxy never raises in Firefox. Skipping it avoids touching
-    // webRequestBlocking on Firefox installs that didn't grant it.
-    if (BX.isFirefox) return;
     if (!BX.webRequest || !BX.webRequest.onAuthRequired) {
       console.warn('[proxy] webRequest.onAuthRequired unavailable');
       return;
@@ -393,66 +387,69 @@
     if (installAuthListener._installed) return;
     installAuthListener._installed = true;
 
-    var extraInfoSpec = ['asyncBlocking'];
-    authListenerFn =
-      function (details, asyncCallback) {
-        // Verbose log so we can confirm whether Chrome actually fires this
-        // hook for SOCKS5 user/pass auth. There's an open question about
-        // whether MV3's webRequest surface covers SOCKS auth (which lives
-        // below the HTTP layer) — this log resolves it definitively.
-        console.log('[proxy] onAuthRequired:',
-          'isProxy=' + details.isProxy,
-          'scheme=' + details.scheme,
-          'realm=' + (details.realm || ''),
-          'challenger=' + (details.challenger ? (details.challenger.host + ':' + details.challenger.port) : ''),
-          'url=' + details.url);
+    // Browser-shape divergence:
+    //   Chrome MV3 → 'asyncBlocking' + an asyncCallback the listener invokes
+    //   Firefox    → 'blocking' + the listener returns a Promise<{...}>
+    // Both paths supply the same {authCredentials: {username, password}}
+    // shape — only the *delivery* differs. The listener below covers
+    // both: it always builds a Promise, and if Chrome handed it an
+    // asyncCallback we fan the result out through that too.
+    //
+    // Both Chrome SOCKS5 (with webRequestAuthProvider) and Firefox HTTPS
+    // proxies (which speak plain HTTP 407) flow through this hook. If we
+    // don't answer, the user sees a browser-native username/password
+    // dialog on every request — the bug from the previous build.
+    var extraInfoSpec = BX.isFirefox ? ['blocking'] : ['asyncBlocking'];
 
-        if (!details.isProxy) {
-          if (asyncCallback) asyncCallback({});
-          return;
-        }
+    function resolveCreds() {
+      if (activeCredentials) return Promise.resolve(activeCredentials);
+      // Slow path: SW/script just woke up and the in-memory copy is gone.
+      // 'asyncBlocking' (Chrome) and 'blocking'+Promise (Firefox) both
+      // hold the connection open while we load from storage.
+      return loadActiveCredentialsFromStorage();
+    }
 
-        // Fast path: in-memory creds already loaded.
-        var creds = activeCredentials;
-        if (creds) {
-          console.log('[proxy] supplying cached creds for', creds.username);
-          if (asyncCallback) {
-            asyncCallback({ authCredentials: { username: creds.username, password: creds.password } });
-          }
-          return;
-        }
+    authListenerFn = function (details, asyncCallback) {
+      console.log('[proxy] onAuthRequired:',
+        'isProxy=' + details.isProxy,
+        'scheme=' + details.scheme,
+        'realm=' + (details.realm || ''),
+        'challenger=' + (details.challenger ? (details.challenger.host + ':' + details.challenger.port) : ''),
+        'url=' + details.url);
 
-        // Slow path: SW just woke up and the in-memory copy is gone.
-        // Fall back to storage. asyncBlocking lets us respond from a
-        // Promise — Chrome holds the connection open in the meantime.
-        loadActiveCredentialsFromStorage().then(function (loaded) {
-          if (!loaded) {
-            // No credentials available means we've already been
-            // disconnected. Returning `cancel:true` here surfaces an
-            // explicit HTTP 407 in the user's tab, which is worse
-            // than letting Chrome handle the missing auth itself.
-            // Returning `{}` (no credentials) lets Chrome close the
-            // connection naturally; the next request on that origin
-            // will go via mode:'direct' and bypass the proxy entirely.
-            console.warn('[proxy] proxy auth requested but no creds — letting Chrome drop the connection');
-            if (asyncCallback) asyncCallback({});
-            return;
+      var p;
+      if (!details.isProxy) {
+        p = Promise.resolve({});
+      } else {
+        p = resolveCreds().then(function (creds) {
+          if (!creds) {
+            // No credentials means we've already been disconnected.
+            // Returning {} lets the browser close the connection
+            // naturally instead of surfacing a user-facing prompt.
+            console.warn('[proxy] proxy auth requested but no creds — dropping the connection');
+            return {};
           }
-          console.log('[proxy] supplying creds (loaded from storage) for', loaded.username);
-          if (asyncCallback) {
-            asyncCallback({ authCredentials: { username: loaded.username, password: loaded.password } });
-          }
+          console.log('[proxy] supplying creds for', creds.username);
+          return { authCredentials: { username: creds.username, password: creds.password } };
         }).catch(function (e) {
           console.error('[proxy] storage load failed inside auth listener', e);
-          if (asyncCallback) asyncCallback({});
+          return {};
         });
-      };
+      }
+
+      // Fan out: Chrome listens via asyncCallback, Firefox via the
+      // returned Promise. We do both so the same listener works on
+      // either browser without per-target wrapping.
+      if (asyncCallback) p.then(asyncCallback);
+      return p;
+    };
+
     BX.webRequest.onAuthRequired.addListener(
       authListenerFn,
       { urls: ['<all_urls>'] },
       extraInfoSpec
     );
-    console.log('[proxy] onAuthRequired listener installed');
+    console.log('[proxy] onAuthRequired listener installed (' + extraInfoSpec[0] + ')');
   }
 
   // Firefox-only: re-register proxy.onRequest after a background script
