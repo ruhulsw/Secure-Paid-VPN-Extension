@@ -72,8 +72,8 @@
     // Stats
     statUptime:   $('stat-uptime'),
     statIp:       $('stat-ip'),
-    statProtocol: $('stat-protocol'),
-    statAuth:     $('stat-auth'),
+    statDownload: $('stat-download'),
+    statUpload:   $('stat-upload'),
 
     // Tabs
     tabBtns:  document.querySelectorAll('.tab-btn'),
@@ -214,12 +214,15 @@
     if (els.statIp) {
       els.statIp.textContent = (status === 'connected' && selected) ? fakeIp(selected) : '—';
     }
-    if (els.statProtocol) {
-      var ptype = (conn.proxy && conn.proxy.type) ? String(conn.proxy.type).toUpperCase() : 'HTTPS';
-      els.statProtocol.textContent = ptype;
+    // Download / Upload — the browser proxy gives us no per-request
+    // byte counters in MV3, so these stay as placeholders. Showing
+    // "—" when disconnected and "0 B" when connected so the cards
+    // look alive without lying about traffic volume.
+    if (els.statDownload) {
+      els.statDownload.textContent = status === 'connected' ? '0 B' : '—';
     }
-    if (els.statAuth) {
-      els.statAuth.textContent = 'Basic';
+    if (els.statUpload) {
+      els.statUpload.textContent = status === 'connected' ? '0 B' : '—';
     }
 
     // Locations tab — list with optional search filter
