@@ -40,9 +40,36 @@
 
   var storageArea = native.storage && native.storage.local;
 
+  // Firefox detection via extension URL scheme. This is the only check
+  // that's bulletproof against:
+  //   - Chrome MV3 aliasing `browser` to `chrome` (made the naive
+  //     `typeof browser !== 'undefined'` check return true on Chrome,
+  //     pushing us into the Firefox auth-listener path with the wrong
+  //     extraInfoSpec)
+  //   - Firefox builds where `browser.runtime.getBrowserInfo` is gated
+  //     or missing (made our subsequent feature-check return false on
+  //     Firefox, dumping us into the Chromium proxy.settings path
+  //     which Firefox rejects without the private-browsing permission)
+  //
+  // The URL prefix is determined by the host browser at install time
+  // and can't be aliased away — `moz-extension://` is Firefox,
+  // `chrome-extension://` is Chromium, full stop.
+  function detectFirefox() {
+    try {
+      var ns = (typeof browser !== 'undefined' && browser) ||
+               (typeof chrome !== 'undefined' && chrome);
+      if (!ns || !ns.runtime || typeof ns.runtime.getURL !== 'function') {
+        return false;
+      }
+      return ns.runtime.getURL('').indexOf('moz-extension://') === 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   var BX = {
     raw: native,
-    isFirefox: typeof browser !== 'undefined',
+    isFirefox: detectFirefox(),
 
     runtime: {
       sendMessage: callAsync(native.runtime, 'sendMessage'),

@@ -265,21 +265,37 @@
 
   function reloadHttpTabs() {
     if (!BX.tabs || typeof BX.tabs.query !== 'function') return;
-    try {
-      // Skip the currently focused tab. Reloading it steals focus from
-      // the action popup, which Chrome auto-dismisses on focus loss —
-      // so the user sees the popup vanish the instant they tap
-      // Disconnect. Background tabs still get reloaded (that's where
-      // most stale keep-alive sockets live anyway); the user can
-      // reload the active tab themselves if they want.
-      BX.tabs.query({}, function (tabs) {
-        (tabs || []).forEach(function (t) {
-          if (!t || !t.id || t.discarded) return;
-          if (t.active) return;
-          if (!t.url || !/^https?:\/\//i.test(t.url)) return;
-          try { BX.tabs.reload(t.id, { bypassCache: false }); } catch (_) {}
-        });
+
+    // Skip the currently focused tab. Reloading it steals focus from
+    // the action popup, which Chrome auto-dismisses on focus loss —
+    // so the user sees the popup vanish the instant they tap
+    // Disconnect. Background tabs still get reloaded (that's where
+    // most stale keep-alive sockets live anyway); the user can
+    // reload the active tab themselves if they want.
+    function processTabs(tabs) {
+      (tabs || []).forEach(function (t) {
+        if (!t || !t.id || t.discarded) return;
+        if (t.active) return;
+        if (!t.url || !/^https?:\/\//i.test(t.url)) return;
+        try { BX.tabs.reload(t.id, { bypassCache: false }); } catch (_) {}
       });
+    }
+
+    // Cross-browser: Firefox's `browser.tabs.query` is Promise-only and
+    // silently ignores a callback argument — the previous callback-style
+    // call left tabs un-reloaded on Firefox, so disconnected sessions
+    // kept tunneling through the dead proxy on long-lived tabs. Detect
+    // the Promise return shape and fall back to the callback form for
+    // older Chromium builds.
+    try {
+      var ret = BX.tabs.query({});
+      if (ret && typeof ret.then === 'function') {
+        ret.then(processTabs).catch(function (e) {
+          console.warn('[bg] reloadHttpTabs query failed:', e && e.message);
+        });
+        return;
+      }
+      BX.tabs.query({}, processTabs);
     } catch (e) {
       console.warn('[bg] reloadHttpTabs failed:', e);
     }
@@ -297,11 +313,38 @@
   // for a non-paying user.
 
   function ensureAlarm() {
-    if (!BX.alarms) return;
-    BX.alarms.get && BX.alarms.get('premium-refresh', function (existing) {
+    if (!BX.alarms || !BX.alarms.get || !BX.alarms.create) return;
+
+    // Cross-browser: Firefox's `browser.alarms.get` is Promise-only and
+    // silently drops a callback argument — the previous callback-style
+    // version meant the alarm was *never* registered on Firefox, so the
+    // 15-minute premium re-check never fired and an expired subscription
+    // would keep tunneling traffic indefinitely. We detect the Promise
+    // return shape and fall back to the callback form for safety.
+    //
+    // We check existence before re-creating because alarms.create() with
+    // a duplicate name *replaces* the existing alarm — resetting the
+    // 15-minute timer on every SW wake-up means the alarm could go
+    // months without firing if the SW restarts often, which it does in
+    // MV3.
+    function maybeCreate(existing) {
       if (existing) return;
       try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (_) {}
-    });
+    }
+    try {
+      var ret = BX.alarms.get('premium-refresh');
+      if (ret && typeof ret.then === 'function') {
+        ret.then(maybeCreate).catch(function () {
+          // alarms.get failing is rare; create defensively so we still
+          // get the periodic re-check.
+          try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (_) {}
+        });
+        return;
+      }
+      BX.alarms.get('premium-refresh', maybeCreate);
+    } catch (_) {
+      try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (__) {}
+    }
   }
 
   if (BX.alarms && BX.alarms.onAlarm) {
@@ -537,21 +580,28 @@
       // without their consent.
       Storage.getConnection()
         .then(function (conn) {
-          // Firefox: the proxy.onRequest listener died with the script.
-          // Try to re-register it from the persisted descriptor + creds.
-          // If that succeeds, the user keeps tunneling through this SW
-          // lifetime; if not, we fall through to the disconnect path.
-          // Without this step, every Firefox SW restart silently drops
-          // the VPN — the popup looks disconnected but the badge says ON
-          // and the user thinks they're still protected.
-          return ProxyCtl.rehydrateFirefoxProxy(conn).then(function (rehydrated) {
-            return { conn: conn, rehydrated: rehydrated };
+          // Two parallel rehydrate paths — only one applies per browser:
+          //  - Firefox: re-register proxy.onRequest from persisted creds.
+          //    Without this, every Firefox SW restart silently drops the
+          //    VPN (popup looks disconnected, badge says ON).
+          //  - Chromium: chrome.proxy.settings persists across SW
+          //    restarts, but the in-memory credential cache and the
+          //    onAuthRequired listener died with the SW. We need creds
+          //    back in memory BEFORE the first buffered 407 is dispatched
+          //    — otherwise the listener answers with cancel/empty and
+          //    Chrome shows the native proxy-auth dialog. The listener
+          //    is registered synchronously at SW boot; awaiting the
+          //    storage load here closes the race window.
+          return Promise.all([
+            ProxyCtl.rehydrateFirefoxProxy(conn),
+            ProxyCtl.rehydrateChromiumAuth(conn),
+          ]).then(function (results) {
+            return { conn: conn, rehydratedFirefox: results[0], rehydratedChromium: results[1] };
           });
         })
         .then(function (state) {
           var conn = state.conn;
-          var rehydrated = state.rehydrated;
-          if (rehydrated) {
+          if (state.rehydratedFirefox) {
             // Firefox path: listener is back, treat as connected.
             setBadge('ON', '#d4a04c');
             broadcastState();
@@ -561,8 +611,10 @@
           return isProxyStillActive().then(function (alive) {
             if (alive && conn && conn.status === 'connected') {
               // Chromium path: chrome.proxy.settings survives SW restarts.
-              // Keep state, restore the badge, refresh the public IP since
-              // the network path may have moved.
+              // rehydrateChromiumAuth has already pulled the persisted
+              // creds back into memory, so the listener can answer the
+              // next 407 immediately. Restore the badge and refresh the
+              // public IP since the network path may have moved.
               setBadge('ON', '#d4a04c');
               broadcastState();
               updatePublicIp();

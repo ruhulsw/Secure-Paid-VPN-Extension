@@ -204,6 +204,11 @@
       } else if (conn.code === 'UNSUPPORTED_PROXY_TYPE') {
         detail = 'This server returned an unsupported proxy type. Try a different server, ' +
                  'or contact support if the problem persists.';
+      } else if (conn.code === 'CHROME_SOCKS_AUTH_UNSUPPORTED') {
+        // setProxyChromium rejects SOCKS proxies that carry credentials —
+        // Chrome can't authenticate to them. Surface the helpful message
+        // verbatim so the user knows it's not a transient network blip.
+        detail = conn.error;
       }
       els.statusError.textContent = detail;
     } else {

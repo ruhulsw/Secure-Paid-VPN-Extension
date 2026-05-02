@@ -59,12 +59,19 @@
       var obj = {}; obj[KEYS.AUTH_TOKEN] = token; return BX.storage.set(obj);
     },
     clearAuth: function () {
+      // Wipe the persisted connection record too — otherwise after logout
+      // the next user (or the locked screen) would see the previous
+      // session's serverId, server, connectedAt, public IP, etc. The
+      // disconnect('logout') that runs before this writes a {status:
+      // 'disconnected'} record but leaves the rest of the metadata; this
+      // ensures the slot is fully cleared.
       return BX.storage.remove([
         KEYS.AUTH_TOKEN,
         KEYS.USER,
         KEYS.IS_PREMIUM,
         KEYS.SUBSCRIPTION,
         KEYS.PROXY_CREDS,
+        KEYS.CONNECTION,
       ]);
     },
 
