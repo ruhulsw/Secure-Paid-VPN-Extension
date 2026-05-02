@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "SecurePaid VPN",
   "short_name": "SecurePaid VPN",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Browser-only VPN by SecurePaid VPN. Active subscription required.",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self'; frame-ancestors 'none'"
