@@ -401,6 +401,15 @@ body {
   align-items: center;
   justify-content: center;
   margin: 4px 0 10px;
+  /* Bound the orb's animation area so the breathing aura + pulse
+     rings don't bleed into the header above or the selected-location
+     card below. Height = orb 150 + ~30 buffer for the gold halo
+     glow on connected. overflow:hidden clips the outermost pulse
+     ring frame (scale 1.35) before it reaches adjacent elements. */
+  height: 180px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .connect-orb {
