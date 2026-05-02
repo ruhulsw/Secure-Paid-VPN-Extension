@@ -426,26 +426,27 @@
     ensureAlarm();
     ProxyCtl.installAuthListener();
     configureApi().then(function (cfg) {
-      // Clear any stale `error` connection status from a previous session.
-      // Without this the popup would keep surfacing yesterday's failure
-      // ("Couldn't reach the API…") long after the underlying issue is
-      // gone — the conn record persists in storage.local and is never
-      // overwritten until the next connect/disconnect.
+      // Reset stale connection status on bootstrap. The persisted
+      // status (could be 'connected', 'connecting', 'error', etc.
+      // from a previous SW lifetime) is no longer authoritative —
+      // Chrome wipes proxy.settings when the SW dies, so the actual
+      // browser state on boot is always "no proxy active".
+      //
+      // Critically: do NOT auto-reconnect here. Earlier versions
+      // re-issued connect() if conn.status === 'connected', which
+      // surprised users — opening the popup or any other event that
+      // wakes the SW would silently start a connection attempt
+      // without their consent. The status pill would flash
+      // "Connecting" out of nowhere. Always start disconnected; let
+      // the user explicitly tap Connect.
       Storage.getConnection().then(function (conn) {
-        if (conn && conn.status === 'error') {
+        if (conn && conn.status !== 'disconnected') {
           return Storage.setConnection({ status: 'disconnected', at: Date.now() })
             .then(function () { broadcastState(); });
         }
       }).catch(function () {});
 
       if (cfg.token) {
-        // Re-issue the proxy if we were connected before the worker restart.
-        // Chrome wipes proxy.settings when the SW dies, so we re-apply.
-        Storage.getConnection().then(function (conn) {
-          if (conn && conn.status === 'connected' && conn.serverId) {
-            connect(conn.serverId).catch(function () { /* swallow — UI shows error */ });
-          }
-        }).catch(function () {});
         refreshMe().catch(function () { /* token may be expired; UI handles */ });
       }
     });
