@@ -358,7 +358,12 @@
   // options.js's renderer (it imports the same shape).
   function formatSubscription(sub) {
     sub = sub || {};
-    var plan = sub.plan || sub.planKey || sub.planName || sub.priceId || 'Premium';
+    var rawPlan = sub.plan || sub.planKey || sub.planName || sub.priceId || 'Premium';
+    // Backend planKey arrives lowercase ("yearly", "monthly", "weekly").
+    // Title-case it for display so the Premium tab doesn't read like a
+    // database dump. Hand-untouched values (already capitalized) pass
+    // through unchanged.
+    var plan = String(rawPlan).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     var status = sub.status || 'Active';
     var renew = sub.expiresAt || sub.currentPeriodEnd || sub.renewsAt || sub.nextBillingDate;
     var renewLabel = '';
@@ -366,7 +371,12 @@
       // Numeric values < 1e12 are unix-seconds; everything else (ISO
       // strings, ms timestamps) goes straight to Date.
       var d = new Date(typeof renew === 'number' && renew < 1e12 ? renew * 1000 : renew);
-      renewLabel = isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+      // Medium format: "May 2, 2026" — unambiguous across locales,
+      // unlike the default short form "5/2/2026" which means different
+      // dates in US vs EU formatting.
+      renewLabel = isNaN(d.getTime())
+        ? ''
+        : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     }
     return { plan: plan, status: status, renewLabel: renewLabel };
   }

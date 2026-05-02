@@ -19,7 +19,8 @@
   // mobile app, or extension and the field shape varies.
   function formatSubscription(sub) {
     sub = sub || {};
-    var plan = sub.plan || sub.planKey || sub.planName || sub.priceId || '';
+    var rawPlan = sub.plan || sub.planKey || sub.planName || sub.priceId || '';
+    var plan = String(rawPlan).replace(/\b\w/g, function (c) { return c.toUpperCase(); });
     var renew = sub.expiresAt || sub.currentPeriodEnd || sub.renewsAt || sub.nextBillingDate;
     var renewLabel = '';
     if (renew) {
