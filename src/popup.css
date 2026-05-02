@@ -23,7 +23,7 @@
   --warning: #f5b265;
   --danger: #f78a8a;
 
-  --tab-bar-height: 60px;
+  --tab-bar-height: 58px;
 }
 
 * { box-sizing: border-box; }
@@ -41,12 +41,12 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-body { min-height: 540px; }
+body { min-height: 600px; }
 
 #root {
   display: flex;
   flex-direction: column;
-  min-height: 540px;
+  min-height: 600px;
   background:
     radial-gradient(ellipse at top, rgba(212, 160, 76, 0.06), transparent 60%),
     linear-gradient(180deg, var(--surface-alt), var(--bg) 280px);
@@ -372,18 +372,18 @@ body { min-height: 540px; }
 
 .form-error { color: var(--danger); font-size: 13px; min-height: 18px; }
 
-/* ---- ConnectButton orb (compact 150px) -------------------------------- */
+/* ---- ConnectButton orb (matches macOS app proportions) --------------- */
 .connect-area {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 6px 0 12px;
+  margin: 8px 0 14px;
 }
 
 .connect-orb {
   position: relative;
-  width: 170px;
-  height: 170px;
+  width: 180px;
+  height: 180px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -432,8 +432,8 @@ body { min-height: 540px; }
 
 .connect-bezel {
   position: relative;
-  width: 166px;
-  height: 166px;
+  width: 176px;
+  height: 176px;
   border-radius: 50%;
   background: linear-gradient(135deg,
     rgba(255,255,255,0.18),
@@ -455,8 +455,8 @@ body { min-height: 540px; }
 
 .connect-orb-inner {
   position: relative;
-  width: 162px;
-  height: 162px;
+  width: 172px;
+  height: 172px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--surface-alt), var(--bg-deep) 60%, #06060a);
   border: 1px solid rgba(255,255,255,0.05);
@@ -480,8 +480,8 @@ body { min-height: 540px; }
 }
 
 .connect-icon {
-  width: 46px;
-  height: 46px;
+  width: 50px;
+  height: 50px;
   color: var(--text);
   filter: drop-shadow(0 0 6px rgba(255,255,255,0.18));
   z-index: 1;
@@ -558,6 +558,57 @@ body { min-height: 540px; }
   border-radius: 10px;
   text-align: left;
   margin-top: 12px;
+}
+
+/* ---- 2x2 Stats grid (mirrors macOS HomeComponents.StatCard) ---------- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  min-width: 0;
+}
+
+.stat-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+.stat-icon--gold    { background: var(--accent-soft); color: var(--accent); }
+.stat-icon--success { background: rgba(110, 231, 183, 0.13); color: var(--success); }
+.stat-icon--warning { background: rgba(245, 178, 101, 0.13); color: var(--warning); }
+
+.stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.stat-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---- Pane heads ------------------------------------------------------- */

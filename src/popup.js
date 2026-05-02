@@ -69,6 +69,12 @@
     openHelp:     $('open-help'),
     settingsLogout:$('settings-logout'),
 
+    // Stats
+    statUptime:   $('stat-uptime'),
+    statIp:       $('stat-ip'),
+    statProtocol: $('stat-protocol'),
+    statAuth:     $('stat-auth'),
+
     // Tabs
     tabBtns:  document.querySelectorAll('.tab-btn'),
     tabPanes: document.querySelectorAll('.tab-pane'),
@@ -77,6 +83,7 @@
   var state = null;
   var activeTab = 'home';
   var searchQuery = '';
+  var uptimeTimer = null;
 
   // ---- Messaging ---------------------------------------------------------
 
@@ -202,6 +209,19 @@
       els.statusError.textContent = '';
     }
 
+    // Stats grid (Home tab) — UPTIME ticks via setInterval, others state-driven
+    updateUptime(conn);
+    if (els.statIp) {
+      els.statIp.textContent = (status === 'connected' && selected) ? fakeIp(selected) : '—';
+    }
+    if (els.statProtocol) {
+      var ptype = (conn.proxy && conn.proxy.type) ? String(conn.proxy.type).toUpperCase() : 'HTTPS';
+      els.statProtocol.textContent = ptype;
+    }
+    if (els.statAuth) {
+      els.statAuth.textContent = 'Basic';
+    }
+
     // Locations tab — list with optional search filter
     var filteredServers = filterServers(servers, searchQuery);
     if (els.locationsSub) {
@@ -302,6 +322,47 @@
     servers.forEach(function (s) {
       els.serverList.appendChild(makeRow(s, s.id === selectedId, s.id === connectedId));
     });
+  }
+
+  // Format elapsed milliseconds as HH:MM:SS, tabular-nums via CSS.
+  function formatDuration(ms) {
+    if (!ms || ms < 0) return '00:00:00';
+    var s = Math.floor(ms / 1000);
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    return (h < 10 ? '0' : '') + h + ':' +
+           (m < 10 ? '0' : '') + m + ':' +
+           (sec < 10 ? '0' : '') + sec;
+  }
+
+  function updateUptime(conn) {
+    if (uptimeTimer) { clearInterval(uptimeTimer); uptimeTimer = null; }
+    if (!els.statUptime) return;
+    if (!conn || conn.status !== 'connected' || !conn.connectedAt) {
+      els.statUptime.textContent = '00:00:00';
+      return;
+    }
+    var startedAt = conn.connectedAt;
+    var paint = function () {
+      els.statUptime.textContent = formatDuration(Date.now() - startedAt);
+    };
+    paint();
+    uptimeTimer = setInterval(paint, 1000);
+  }
+
+  // Deterministic placeholder "virtual IP" — same recipe as the mobile
+  // app's utils/format.fakeIp(server). Hashes the server id into an
+  // RFC1918 10.x.y.z address so the stat card has something to show.
+  function fakeIp(server) {
+    if (!server || !server.id) return '—';
+    var h = 0;
+    var id = String(server.id);
+    for (var i = 0; i < id.length; i++) h = (h + id.charCodeAt(i)) >>> 0;
+    var b = (((h >>> 16) & 0xff) % 254) + 1;
+    var c = (((h >>> 8)  & 0xff) % 254) + 1;
+    var d = ((h          & 0xff) % 254) + 1;
+    return '10.' + b + '.' + c + '.' + d;
   }
 
   function flagEmoji(cc) {
