@@ -262,6 +262,22 @@
   }
 
   function clearProxyFirefox() {
+    // Mirror the fallback in setProxyFirefox: BX.isFirefox is just
+    // `typeof browser !== 'undefined'`, which is also true on Chromium
+    // variants that ship a `browser` polyfill (Edge with
+    // webextension-polyfill, some Brave packagers). On those,
+    // browser.proxy.onRequest doesn't exist — so the per-request
+    // listener never got installed, and nothing about the actual
+    // proxy will get cleared here. Without this fallback, Disconnect
+    // appears to succeed (logs show "firefox: listener removed") but
+    // the chromium-style proxy.settings stays at fixed_servers and
+    // the browser keeps routing traffic through the dead proxy host.
+    if (!BX.raw || !BX.raw.proxy || !BX.raw.proxy.onRequest ||
+        typeof BX.raw.proxy.onRequest.removeListener !== 'function') {
+      console.warn('[proxy] clearProxyFirefox: onRequest unavailable, falling back to chromium clear');
+      return clearProxyChromium();
+    }
+
     if (firefoxListener) {
       try { BX.raw.proxy.onRequest.removeListener(firefoxListener); } catch (_) {}
       firefoxListener = null;
