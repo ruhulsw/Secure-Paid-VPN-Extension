@@ -73,29 +73,67 @@
   }
 
   function clearProxyChromium() {
-    // CRITICAL: only set { mode: 'direct' } — do NOT also call
-    // settings.clear() afterwards.
+    // Set mode:'direct' and STAY in control. Calling settings.clear()
+    // would merely release our policy hold, letting any underlying
+    // proxy (another extension, MDM policy, OS network proxy, stale
+    // PAC) take over — that's the bug where "Disconnect didn't
+    // disconnect" came from.
     //
-    // settings.clear() merely releases our extension's policy hold on
-    // the proxy. If anything else (another VPN extension, an MDM
-    // policy, the OS-level network proxy, even an old PAC URL) is
-    // configured at a lower priority, clear() lets THAT take over —
-    // and the browser keeps routing traffic through whatever was
-    // underneath. The user observes "I clicked Disconnect but the
-    // browser is still going through the VPN/proxy".
-    //
-    // By staying in control with mode:'direct', every outbound socket
-    // bypasses every proxy layer beneath us. This is what every other
-    // production VPN extension does. We give up the policy slot, but
-    // that's a non-cost (we'll re-claim it on the next connect).
-    return new Promise(function (resolve, reject) {
+    // After setting, *verify* with settings.get() and retry once if
+    // we're somehow still in fixed_servers mode. Logs the result so
+    // you can see in the SW DevTools console exactly what happened.
+    function applyDirect() {
+      return new Promise(function (resolve, reject) {
+        try {
+          BX.proxy.settings.set({ value: { mode: 'direct' }, scope: 'regular' }, function () {
+            var lastErr = BX.raw.runtime && BX.raw.runtime.lastError;
+            if (lastErr) return reject(new Error(lastErr.message));
+            resolve();
+          });
+        } catch (e) { reject(e); }
+      });
+    }
+
+    function verifyDirect() {
+      return new Promise(function (resolve) {
+        try {
+          BX.proxy.settings.get({ incognito: false }, function (details) {
+            console.log('[proxy] post-clear settings:',
+              'mode=' + (details && details.value && details.value.mode),
+              'levelOfControl=' + (details && details.levelOfControl));
+            resolve(details && details.value && details.value.mode === 'direct');
+          });
+        } catch (e) {
+          console.warn('[proxy] settings.get failed during verify:', e);
+          resolve(false);
+        }
+      });
+    }
+
+    function flushHandlerCache() {
+      // Nudges Chrome to drop cached webRequest decisions so any
+      // in-flight request handlers re-evaluate. Doesn't kill open
+      // TCP connections (Chrome can't expose that), but stops new
+      // requests on long-lived tabs from silently reusing the dead
+      // proxy. Best-effort — guarded for browsers without webRequest.
       try {
-        BX.proxy.settings.set({ value: { mode: 'direct' }, scope: 'regular' }, function () {
-          var lastErr = BX.raw.runtime && BX.raw.runtime.lastError;
-          if (lastErr) return reject(new Error(lastErr.message));
-          resolve();
-        });
-      } catch (e) { reject(e); }
+        if (BX.webRequest && typeof BX.webRequest.handlerBehaviorChanged === 'function') {
+          BX.webRequest.handlerBehaviorChanged();
+        }
+      } catch (_) { /* ignore */ }
+    }
+
+    return applyDirect().then(verifyDirect).then(function (ok) {
+      if (ok) { flushHandlerCache(); return; }
+      console.warn('[proxy] direct mode did NOT take effect after first try, retrying');
+      return applyDirect().then(verifyDirect).then(function (ok2) {
+        if (!ok2) {
+          console.error('[proxy] FAILED to put proxy into direct mode after 2 tries — ' +
+            'another extension or system policy may be holding the proxy slot');
+          throw new Error('Proxy did not switch to direct mode (mode is still fixed_servers)');
+        }
+        flushHandlerCache();
+      });
     });
   }
 

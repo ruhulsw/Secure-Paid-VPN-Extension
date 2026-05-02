@@ -160,14 +160,31 @@
   }
 
   function disconnect(reason) {
-    return ProxyCtl.clear().catch(function () { /* clear is best-effort */ })
-      .then(function () {
-        return Storage.setConnection({ status: 'disconnected', reason: reason || null, at: Date.now() });
+    var clearError = null;
+    return ProxyCtl.clear()
+      .catch(function (err) {
+        // Don't swallow silently — log the actual reason so it's
+        // visible in the SW DevTools and surface it to the popup.
+        console.error('[bg] disconnect: ProxyCtl.clear failed:', err && err.message, err);
+        clearError = err;
       })
       .then(function () {
-        setBadge('', '#000000');
+        var connState = clearError
+          ? {
+              status: 'error',
+              error: 'Failed to release proxy: ' + (clearError.message || String(clearError)) +
+                     '. The browser may still be routing traffic — try reloading your tabs.',
+              at: Date.now(),
+            }
+          : { status: 'disconnected', reason: reason || null, at: Date.now() };
+        return Storage.setConnection(connState);
+      })
+      .then(function () {
+        setBadge(clearError ? '!' : '', clearError ? '#f78a8a' : '#000000');
         broadcastState();
-        if (!reason || reason === 'user') {
+        if (clearError) {
+          notify('Disconnect failed', 'Browser may still be using the VPN. Reload your tabs.');
+        } else if (!reason || reason === 'user') {
           notify('Disconnected', 'Browser is now using its direct connection.');
         }
       });
