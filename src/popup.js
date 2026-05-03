@@ -558,4 +558,10 @@
     setActiveView('auth');
     console.error('[popup] init failed', err);
   });
+
+  // Fire-and-forget refresh of the server list on every popup open so newly
+  // added locations show up without the user having to click "Refresh list".
+  // Cached state already painted above; this triggers a state-changed
+  // broadcast on completion that re-renders with the fresh list.
+  send('refresh-servers').catch(function () {});
 })();
