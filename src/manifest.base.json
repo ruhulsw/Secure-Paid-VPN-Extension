@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "SecurePaid VPN",
-  "short_name": "SecurePaid VPN",
+  "name": "Free VPN for Chrome – SecurePaid VPN Proxy",
+  "short_name": "SP VPN",
   "version": "1.0.1",
-  "description": "Browser-only VPN by SecurePaid VPN. Active subscription required.",
+  "description": "Free VPN for Chrome — fast US, EU, Asia servers. Unblock sites, hide your IP. 20 min/day free, no signup. Premium for unlimited.",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self'; frame-ancestors 'none'"
   },
