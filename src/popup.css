@@ -362,6 +362,40 @@ body {
 .btn-ghost:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-alt); }
 .btn-ghost svg { color: var(--text-muted); flex-shrink: 0; }
 
+/* "Try free — 20 min/day" CTA on the auth + locked views.
+   Visually subordinate to the primary sign-in button (no gold fill)
+   but more prominent than .btn-ghost so the free path stays
+   discoverable without competing with the paid CTA. */
+.btn-guest {
+  background: rgba(212, 160, 76, 0.08);
+  border: 1px solid rgba(212, 160, 76, 0.35);
+  color: var(--accent);
+}
+.btn-guest:hover:not(:disabled) {
+  background: rgba(212, 160, 76, 0.16);
+  border-color: var(--accent);
+}
+.btn-guest svg { color: var(--accent); flex-shrink: 0; }
+
+/* "or" divider between the standard auth buttons and the guest CTA */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 2px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .link {
   background: none;
   border: 0;

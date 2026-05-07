@@ -19,6 +19,11 @@
     // creds for the dead session linger in storage.local until the next
     // connect overwrites them).
     PROXY_CREDS: '__proxyCredentials',
+    // Free-tier guest session — only present when the user clicked
+    // "Try free", absent for both signed-out users and signed-in
+    // paid users. Cleared on sign-in, on disconnect, and when the
+    // backend reports the daily 20-min quota is used up.
+    GUEST_SESSION: 'guestSession',
   };
 
   var DEFAULT_SETTINGS = {
@@ -64,7 +69,8 @@
       // session's serverId, server, connectedAt, public IP, etc. The
       // disconnect('logout') that runs before this writes a {status:
       // 'disconnected'} record but leaves the rest of the metadata; this
-      // ensures the slot is fully cleared.
+      // ensures the slot is fully cleared. Also wipes any guest session
+      // so the next sign-in attempt doesn't look "half free, half paid".
       return BX.storage.remove([
         KEYS.AUTH_TOKEN,
         KEYS.USER,
@@ -72,7 +78,23 @@
         KEYS.SUBSCRIPTION,
         KEYS.PROXY_CREDS,
         KEYS.CONNECTION,
+        KEYS.GUEST_SESSION,
       ]);
+    },
+
+    // ---- Guest free-tier session ----------------------------------------
+
+    getGuestSession: function () {
+      return BX.storage.get(KEYS.GUEST_SESSION).then(function (r) {
+        return r[KEYS.GUEST_SESSION] || null;
+      });
+    },
+    setGuestSession: function (session) {
+      var obj = {}; obj[KEYS.GUEST_SESSION] = session || null;
+      return BX.storage.set(obj);
+    },
+    clearGuestSession: function () {
+      return BX.storage.remove(KEYS.GUEST_SESSION);
     },
 
     getUser: function () {

@@ -34,6 +34,7 @@
     signupError:    $('signup-error'),
     signupSubmit:   $('signup-submit'),
     showLogin:      $('show-login'),
+    guestBtn:       $('guest-btn'),
 
     // Locked
     openPricing:   $('open-pricing'),
@@ -116,8 +117,36 @@
     v.classList.remove('hidden');
 
     var isMain = name === 'main';
+    var isGuest = !!(state && state.guestSession);
     els.statusPill.hidden = !isMain;
-    els.brandSub.hidden   = !isMain || !(state && state.isPremium);
+    // Header sub-line: "Premium · Unlimited" for paid users,
+    // "Free trial · MM:SS left" for guests, hidden otherwise.
+    if (isMain && isGuest) {
+      var remaining = computeGuestRemainingSeconds();
+      els.brandSub.hidden = false;
+      els.brandSub.textContent = 'Free trial · ' + formatMmSs(remaining) + ' left today';
+    } else {
+      els.brandSub.hidden = !isMain || !(state && state.isPremium);
+      if (isMain && state && state.isPremium) els.brandSub.textContent = 'Premium · Unlimited';
+    }
+  }
+
+  // Best-effort local countdown — heartbeat updates state.guestSession.
+  // remainingSeconds every 30s, so between ticks we extrapolate using
+  // the connectedAt + lastHeartbeatAt timestamps to keep the counter
+  // smooth instead of frozen.
+  function computeGuestRemainingSeconds() {
+    if (!state || !state.guestSession) return 0;
+    var s = state.guestSession;
+    var elapsedSinceHeartbeat = Math.max(0, Math.floor((Date.now() - (s.lastHeartbeatAt || Date.now())) / 1000));
+    return Math.max(0, (s.remainingSeconds || 0) - elapsedSinceHeartbeat);
+  }
+
+  function formatMmSs(totalSeconds) {
+    var t = Math.max(0, Math.floor(totalSeconds || 0));
+    var m = Math.floor(t / 60);
+    var s = t % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
   function setActiveTab(name) {
@@ -134,6 +163,18 @@
 
   function render() {
     if (!state) { setActiveView('loading'); return; }
+
+    // Guest free-tier session takes priority over the auth gate — when
+    // a guest session exists we show the main view (with a free-trial
+    // countdown badge) regardless of whether the user is signed in or
+    // premium. Disconnecting (manually or quota-exhausted) clears the
+    // guestSession in storage and the next render() reverts to the
+    // appropriate auth/locked/main view.
+    if (state.guestSession) {
+      setActiveView('main');
+      renderMain();
+      return;
+    }
 
     if (!state.isAuthenticated) {
       setActiveView('auth');
@@ -346,14 +387,27 @@
     if (!els.statUptime) return;
     if (!conn || conn.status !== 'connected' || !conn.connectedAt) {
       els.statUptime.textContent = '00:00:00';
-      return;
+      // Guest countdown still needs to tick even when uptime element is
+      // unset, so fall through to install the secondary timer below.
+    } else {
+      var startedAt = conn.connectedAt;
+      var paintUptime = function () {
+        els.statUptime.textContent = formatDuration(Date.now() - startedAt);
+      };
+      paintUptime();
     }
-    var startedAt = conn.connectedAt;
+    var isGuest = !!(state && state.guestSession);
     var paint = function () {
-      els.statUptime.textContent = formatDuration(Date.now() - startedAt);
+      if (els.statUptime && conn && conn.status === 'connected' && conn.connectedAt) {
+        els.statUptime.textContent = formatDuration(Date.now() - conn.connectedAt);
+      }
+      if (isGuest && !els.brandSub.hidden) {
+        els.brandSub.textContent = 'Free trial · ' + formatMmSs(computeGuestRemainingSeconds()) + ' left today';
+      }
     };
-    paint();
-    uptimeTimer = setInterval(paint, 1000);
+    if ((conn && conn.status === 'connected' && conn.connectedAt) || isGuest) {
+      uptimeTimer = setInterval(paint, 1000);
+    }
   }
 
   // Backend subscription objects come in two shapes depending on whether
@@ -468,6 +522,33 @@
     e.preventDefault();
     send('open-page', { path: '/forgot' }).catch(function () {});
   });
+
+  // "Try free — 20 min/day" — anonymous guest connect. Backend issues
+  // a per-device session and short-lived proxy creds; background.js
+  // applies the proxy and starts a 30-sec heartbeat alarm that ticks
+  // the daily quota down. No account required.
+  if (els.guestBtn) {
+    els.guestBtn.addEventListener('click', function () {
+      els.loginError.textContent = '';
+      setBusy(els.guestBtn, true, 'Starting free trial…');
+      send('guest-start')
+        .then(refresh)
+        .catch(function (err) {
+          var msg = err.message || 'Free trial unavailable right now';
+          if (err.code === 'GUEST_QUOTA_EXHAUSTED') {
+            msg = "Today's 20 minutes are gone. Resets at midnight UTC, or sign in for unlimited.";
+          } else if (err.code === 'IP_RATE_LIMIT') {
+            msg = 'Too many free trials from this network today. Try again tomorrow or sign in.';
+          } else if (err.code === 'NO_GUEST_SERVER') {
+            msg = 'Free-trial server is busy — try again in a minute.';
+          }
+          els.loginError.textContent = msg;
+        })
+        .then(function () {
+          setBusy(els.guestBtn, false, 'Try free — 20 min/day, no account');
+        });
+    });
+  }
 
   els.openPricing.addEventListener('click', function () {
     send('open-page', { path: '/pricing' }).catch(function () {});

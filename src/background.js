@@ -208,6 +208,186 @@
       });
   }
 
+  // ---- Free-tier guest mode ----------------------------------------------
+  //
+  // Same shape as the paid `connect()` above: hit /api/guest/start, get
+  // back a proxy descriptor, ProxyCtl.apply() the same way. The only
+  // differences: no auth token required (guest endpoints are anonymous,
+  // identified by deviceId), and a periodic /api/guest/heartbeat alarm
+  // ticks down the 20-min/day quota and tears the session down when it
+  // hits zero (or when the next-day reset window crosses).
+
+  function guestConnect() {
+    console.log('[bg] guestConnect() begin');
+    return configureApi().then(function (cfg) {
+      // Make sure no leftover proxy from a previous failed attempt is
+      // routing the API call we're about to make.
+      return ProxyCtl.clear().catch(function () {})
+        .then(function () { return Storage.getOrCreateDeviceUuid(); })
+        .then(function (deviceUuid) {
+          return Storage.setConnection({ status: 'connecting', startedAt: Date.now(), guest: true })
+            .then(function () { broadcastState(); return deviceUuid; });
+        })
+        .then(function (deviceUuid) {
+          console.log('[bg] requesting guest session');
+          return api.guestStart(deviceUuid).then(function (resp) {
+            return { deviceUuid: deviceUuid, resp: resp };
+          });
+        })
+        .then(function (state) {
+          var resp = state.resp;
+          if (!resp.proxy) {
+            throw new Error('Free-tier proxy is not available on this exit node — try again shortly.');
+          }
+          var proxy = resp.proxy;
+          var bypass = (resp.proxy && resp.proxy.bypassList) || [];
+          return ProxyCtl.apply(proxy, bypass).then(function () {
+            console.log('[bg] guest proxy applied');
+            var guestSession = {
+              deviceId: state.deviceUuid,
+              sessionToken: resp.sessionToken,
+              server: resp.server,
+              remainingSeconds: resp.remainingSeconds,
+              quotaSeconds: resp.quotaSeconds,
+              resetAt: resp.resetAt,
+              connectedAt: Date.now(),
+              lastHeartbeatAt: Date.now(),
+            };
+            var conn = {
+              status: 'connected',
+              guest: true,
+              serverId: resp.server.id,
+              server: resp.server,
+              proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
+              connectedAt: Date.now(),
+            };
+            return Promise.all([
+              Storage.setGuestSession(guestSession),
+              Storage.setConnection(conn),
+            ]).then(function () {
+              setBadge('FREE', '#d4a04c');
+              broadcastState();
+              ensureGuestHeartbeatAlarm();
+              notify(
+                'Free trial connected',
+                'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
+                  '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
+              );
+              updatePublicIp({ force: true });
+              return conn;
+            });
+          });
+        })
+        .catch(function (err) {
+          console.error('[bg] guestConnect() failed:', err && err.name, err && err.message);
+          return ProxyCtl.clear().catch(function () {})
+            .then(function () {
+              return Storage.setConnection({
+                status: 'error',
+                guest: true,
+                error: err && err.message ? err.message : String(err),
+                code: err && err.code,
+                at: Date.now(),
+              });
+            })
+            .then(function () {
+              setBadge('', '#000000');
+              broadcastState();
+              throw err;
+            });
+        });
+    });
+  }
+
+  // Heartbeat alarm. MV3 service workers can't keep a setInterval going
+  // (they get killed after ~30s idle), so we use BX.alarms which the
+  // browser persists across SW restarts. Period = 0.5 min (30s) — the
+  // smallest Chromium permits — so disconnect lands within ~30s of
+  // quota expiry. The backend caps secondsElapsed at 120s server-side,
+  // which means a long SW sleep can't burn through the whole quota in
+  // one report.
+  function ensureGuestHeartbeatAlarm() {
+    if (!BX.alarms || !BX.alarms.create) return;
+    try { BX.alarms.create('guest-heartbeat', { periodInMinutes: 0.5 }); } catch (_) {}
+  }
+
+  function clearGuestHeartbeatAlarm() {
+    if (!BX.alarms || !BX.alarms.clear) return;
+    try { BX.alarms.clear('guest-heartbeat'); } catch (_) {}
+  }
+
+  function guestHeartbeatTick() {
+    return Storage.getGuestSession().then(function (session) {
+      if (!session || !session.sessionToken) {
+        clearGuestHeartbeatAlarm();
+        return;
+      }
+      return configureApi().then(function () {
+        var now = Date.now();
+        var elapsed = Math.max(1, Math.round((now - (session.lastHeartbeatAt || now)) / 1000));
+        return api.guestHeartbeat(session.deviceId, session.sessionToken, elapsed)
+          .then(function (resp) {
+            session.remainingSeconds = resp.remainingSeconds;
+            session.lastHeartbeatAt = now;
+            session.resetAt = resp.resetAt || session.resetAt;
+            return Storage.setGuestSession(session).then(function () {
+              if (resp.disconnect) {
+                return guestDisconnect('quota-exhausted').then(function () {
+                  notify('Free trial used up',
+                    'Today\'s 20 minutes are gone. Resets at midnight UTC, or sign in for unlimited.');
+                });
+              }
+              broadcastState();
+            });
+          })
+          .catch(function (err) {
+            console.warn('[bg] guest heartbeat failed:', err && err.code, err && err.message);
+            // GUEST_SESSION_INVALID → server forgot us (restart, midnight reset).
+            // Tear down so the popup goes back to "try free" CTA.
+            if (err && (err.code === 'GUEST_SESSION_INVALID' || err.status === 401)) {
+              return guestDisconnect('session-expired');
+            }
+          });
+      });
+    });
+  }
+
+  function guestDisconnect(reason) {
+    var clearError = null;
+    return Storage.getGuestSession().then(function (session) {
+      // Best-effort end-call — failures here just leave the row to
+      // expire on its own when its TTL fires.
+      var ended = (session && session.sessionToken)
+        ? configureApi().then(function () {
+            return api.guestEnd(session.deviceId, session.sessionToken).catch(function () {});
+          })
+        : Promise.resolve();
+      return ended.then(function () {
+        return ProxyCtl.clear().catch(function (err) { clearError = err; });
+      });
+    }).then(function () {
+      clearGuestHeartbeatAlarm();
+      var connState = clearError
+        ? {
+            status: 'error',
+            error: 'Failed to release proxy: ' + (clearError.message || String(clearError)),
+            at: Date.now(),
+          }
+        : { status: 'disconnected', reason: reason || null, at: Date.now() };
+      return Promise.all([
+        Storage.clearGuestSession(),
+        Storage.setConnection(connState),
+      ]);
+    }).then(function () {
+      setBadge(clearError ? '!' : '', clearError ? '#f78a8a' : '#000000');
+      broadcastState();
+      if (!clearError && (reason === 'user' || reason == null)) {
+        reloadHttpTabs();
+        notify('Disconnected', 'Browser is now using its direct connection.');
+      }
+    });
+  }
+
   // ---- Public-IP lookup --------------------------------------------------
   // Fired right after a successful connect. Routes through the proxy
   // (api.ipify.org isn't in ALWAYS_BYPASS), so the IP we get back is the
@@ -349,6 +529,10 @@
 
   if (BX.alarms && BX.alarms.onAlarm) {
     BX.alarms.onAlarm.addListener(function (alarm) {
+      if (alarm.name === 'guest-heartbeat') {
+        guestHeartbeatTick().catch(function () { /* ignore — next tick retries */ });
+        return;
+      }
       if (alarm.name !== 'premium-refresh') return;
       Storage.getAuthToken().then(function (token) {
         if (!token) return;
@@ -380,6 +564,7 @@
         Storage.getSelectedServerId(),
         Storage.getServers(),
         Storage.getSettings(),
+        Storage.getGuestSession(),
       ]).then(function (r) {
         return {
           isAuthenticated: !!r[0],
@@ -391,6 +576,7 @@
           servers: r[5].servers,
           serversFetchedAt: r[5].fetchedAt,
           settings: r[6],
+          guestSession: r[7],
         };
       });
     },
@@ -464,7 +650,14 @@
     },
 
     'disconnect': function () {
-      return disconnect('user');
+      return Storage.getGuestSession().then(function (session) {
+        if (session && session.sessionToken) return guestDisconnect('user');
+        return disconnect('user');
+      });
+    },
+
+    'guest-start': function () {
+      return guestConnect();
     },
 
     'set-settings': function (msg) {
@@ -631,6 +824,14 @@
       if (cfg.token) {
         refreshMe().catch(function () { /* token may be expired; UI handles */ });
       }
+
+      // Re-arm the guest-heartbeat alarm if a guest session is currently
+      // active. Alarms persist across SW restarts on Chromium but are
+      // wiped on Firefox SW restart — re-creating is idempotent (alarm
+      // with the same name is replaced) so this is safe everywhere.
+      Storage.getGuestSession().then(function (session) {
+        if (session && session.sessionToken) ensureGuestHeartbeatAlarm();
+      });
     });
   }
 

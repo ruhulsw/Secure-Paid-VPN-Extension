@@ -121,5 +121,77 @@
     return this.request('/api/plans');
   };
 
+  // --- Guest free-tier (20 min/day, no account) ----------------------------
+  //
+  // Same backend endpoints the Cross / Mac SwiftUI / mobile clients use.
+  // We don't send the Authorization header for guest calls — these
+  // routes are deliberately unauthenticated and identify the device by
+  // the deviceId payload field (a hashed per-install UUID).
+
+  Api.prototype.guestStart = function (deviceId) {
+    var url = buildUrl(this.base, '/api/guest/start');
+    return withTimeout(
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: deviceId }),
+        credentials: 'omit',
+      }).then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) {
+            var err = new Error((data && data.error) || ('HTTP ' + res.status));
+            err.status = res.status;
+            err.code = data && data.code;
+            err.payload = data;
+            throw err;
+          }
+          return data;
+        });
+      }),
+      20000
+    );
+  };
+
+  Api.prototype.guestHeartbeat = function (deviceId, sessionToken, secondsElapsed) {
+    var url = buildUrl(this.base, '/api/guest/heartbeat');
+    return withTimeout(
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId: deviceId,
+          sessionToken: sessionToken,
+          secondsElapsed: secondsElapsed,
+        }),
+        credentials: 'omit',
+      }).then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) {
+            var err = new Error((data && data.error) || ('HTTP ' + res.status));
+            err.status = res.status;
+            err.code = data && data.code;
+            err.payload = data;
+            throw err;
+          }
+          return data;
+        });
+      }),
+      10000
+    );
+  };
+
+  Api.prototype.guestEnd = function (deviceId, sessionToken) {
+    var url = buildUrl(this.base, '/api/guest/end');
+    return withTimeout(
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId: deviceId, sessionToken: sessionToken }),
+        credentials: 'omit',
+      }).then(function (res) { return res.text().then(function () { return null; }); }),
+      5000
+    );
+  };
+
   root.Api = Api;
 })(typeof self !== 'undefined' ? self : this);
