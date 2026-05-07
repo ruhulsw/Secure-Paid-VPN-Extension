@@ -1,4 +1,6 @@
 {
+  "name": "Free VPN for Firefox – SecurePaid VPN Proxy",
+  "description": "Free VPN for Firefox — fast US, EU, Asia servers. Unblock sites, hide your IP. 20 min/day free, no signup. Premium for unlimited.",
   "background": {
     "scripts": [
       "lib/browser.js",
