@@ -11,6 +11,7 @@
     "build:edge": "node tools/build.mjs edge",
     "icons": "node tools/make-icons.mjs",
     "package": "node tools/build.mjs && node tools/zip.mjs",
+    "package:firefox-source": "node tools/source-zip.mjs",
     "clean": "rm -rf dist"
   },
   "engines": {
