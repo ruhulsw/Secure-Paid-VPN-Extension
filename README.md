@@ -1,8 +1,8 @@
 # SecurePaid VPN — Browser Extension
 
-Chrome and Firefox extension that signs in with your SecurePaid VPN
-account and routes the **browser's** traffic through a TLS-encrypted
-HTTPS proxy on the exit node you select. Your operating system's
+Chrome, Edge, and Firefox extension that signs in with your
+SecurePaid VPN account and routes the **browser's** traffic through
+a TLS-encrypted HTTPS proxy on the exit node you select. Your operating system's
 network stack and other applications are not affected — only browser
 traffic flows through the tunnel.
 
@@ -17,7 +17,7 @@ account works on the mobile app, the website, and this extension.
 
 ## Install
 
-### Chrome / Edge / Brave
+### Chrome / Brave
 
 Once published in the Chrome Web Store, install with one click. To
 test or build from source:
@@ -27,11 +27,23 @@ test or build from source:
 3. Enable **Developer mode**
 4. Click **Load unpacked** → pick the `dist/chrome/` folder
 
+### Microsoft Edge
+
+Once published in the Edge Add-ons store, install with one click.
+To test from source:
+
+1. `node tools/build.mjs edge` to produce `dist/edge/` (byte-identical
+   to `dist/chrome/`; emitted to a separate folder so the Edge
+   Add-ons store gets its own upload artifact)
+2. Open `edge://extensions`
+3. Enable **Developer mode**
+4. Click **Load unpacked** → pick the `dist/edge/` folder
+
 ### Firefox
 
 Once published on AMO, install with one click. To test from source:
 
-1. `node tools/build.mjs` to produce `dist/firefox/`
+1. `node tools/build.mjs firefox` to produce `dist/firefox/`
 2. Open `about:debugging#/runtime/this-firefox`
 3. **Load Temporary Add-on…** → pick `dist/firefox/manifest.json`
 
@@ -107,7 +119,7 @@ string — none are used). Every script that runs is in the .zip.
 ```
 src/
   manifest.base.json     shared MV3 manifest
-  manifest.chrome.json   Chrome-only overrides
+  manifest.chrome.json   Chromium overlay (used by Chrome AND Edge builds)
   manifest.firefox.json  Firefox-only overrides
   background.js          auth + connect/disconnect + alarm
   popup.html / .css / .js   sign-in + server list + Connect pill
@@ -134,18 +146,21 @@ Every file in `dist/<browser>/` is a 1:1 copy of the corresponding
 ## Build, package, publish
 
 ```bash
-node tools/build.mjs       # → dist/chrome/  + dist/firefox/
+node tools/build.mjs       # → dist/chrome/ + dist/firefox/ + dist/edge/
 npm run build:chrome       # one target only
-npm run package            # build + zip
+npm run build:edge         # ditto for Edge (Chromium overlay)
+npm run build:firefox      # ditto for Firefox
+npm run package            # build + zip all three
 npm run icons              # regenerate icon PNGs from src/icons/source-logo.png
 ```
 
 To cut a new release:
 
 1. Bump `version` in `src/manifest.base.json`.
-2. `npm run package` to produce `dist/secure-paid-vpn-{chrome,firefox}.zip`.
+2. `npm run package` to produce `dist/secure-paid-vpn-{chrome,edge,firefox}.zip`.
 3. Upload the Chrome zip to the Chrome Web Store dashboard.
-4. Upload the Firefox zip to <https://addons.mozilla.org/developers/>
+4. Upload the Edge zip to <https://partner.microsoft.com/dashboard/microsoftedge/>.
+5. Upload the Firefox zip to <https://addons.mozilla.org/developers/>
    (or sign for self-distribution via `web-ext sign`).
 
 ---

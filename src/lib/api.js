@@ -92,6 +92,23 @@
     });
   };
 
+  // Email verification — submits the 6-digit OTP that was emailed to
+  // the user. JWT-authed because we use the bearer to scope the code
+  // check to the right account. Server rate-limits to 5 wrong codes
+  // per round; user can tap Resend to reset.
+  Api.prototype.verifyEmailCode = function (code) {
+    return this.request('/api/auth/verify-email-code', {
+      method: 'POST',
+      body: { code: String(code || '').trim() },
+    });
+  };
+
+  // Resend the verification email — requires JWT, 60-sec floor per
+  // account. Server returns 429 with retryAfter when throttled.
+  Api.prototype.resendVerify = function () {
+    return this.request('/api/auth/resend-verify', { method: 'POST' });
+  };
+
   // --- Subscription --------------------------------------------------------
 
   Api.prototype.subscriptionStatus = function () {
@@ -191,6 +208,30 @@
       }).then(function (res) { return res.text().then(function () { return null; }); }),
       5000
     );
+  };
+
+  // --- Email-verified user tier (2 hours/day) -----------------------------
+  //
+  // Same response shape as guest start/heartbeat/end, but JWT-authed —
+  // the backend keys quota by userId rather than deviceId and returns
+  // a 7200s quotaSeconds (vs the anonymous 1200s).
+
+  Api.prototype.userSessionStart = function () {
+    return this.request('/api/user-session/start', { method: 'POST' });
+  };
+
+  Api.prototype.userSessionHeartbeat = function (sessionToken, secondsElapsed) {
+    return this.request('/api/user-session/heartbeat', {
+      method: 'POST',
+      body: { sessionToken: sessionToken, secondsElapsed: secondsElapsed },
+    });
+  };
+
+  Api.prototype.userSessionEnd = function (sessionToken) {
+    return this.request('/api/user-session/end', {
+      method: 'POST',
+      body: { sessionToken: sessionToken },
+    });
   };
 
   root.Api = Api;

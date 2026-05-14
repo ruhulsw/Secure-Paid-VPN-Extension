@@ -2,6 +2,9 @@
 // source tree under `src/` and emit:
 //   dist/chrome/   — Manifest V3 with `service_worker` background entry
 //   dist/firefox/  — Manifest V3 with `scripts` background entry + gecko id
+//   dist/edge/     — same MV3 manifest as Chrome (Edge is Chromium), but
+//                    emitted to its own folder + zip so the Microsoft
+//                    Edge Add-ons store gets its own upload artifact
 //
 // No bundler. Browser extensions don't need one — we just merge manifests
 // and copy files. Run via `npm run build` or `node tools/build.mjs [target]`.
@@ -17,7 +20,17 @@ const SRC = resolve(ROOT, 'src');
 const ICONS = resolve(SRC, 'icons');
 const DIST = resolve(ROOT, 'dist');
 
-const TARGETS = ['chrome', 'firefox'];
+const TARGETS = ['chrome', 'firefox', 'edge'];
+
+// Per-target manifest overlay. Multiple targets can point at the same
+// overlay file when their MV3 shape is identical — Edge is Chromium
+// (service_worker background, webRequestAuthProvider, etc.), so it
+// reuses Chrome's overlay rather than duplicating the JSON.
+const MANIFEST_OVERLAY = {
+  chrome: 'chrome',
+  firefox: 'firefox',
+  edge: 'chrome',
+};
 
 async function readJson(path) {
   return JSON.parse(await fs.readFile(path, 'utf8'));
@@ -84,14 +97,15 @@ async function buildTarget(target) {
   // repo so the icon generator can reach for it, but the extension only
   // needs the resampled PNGs).
   await copyTree(SRC, targetDist, (p, entry) => {
-    if (entry.isFile() && /^manifest\.(base|chrome|firefox)\.json$/.test(entry.name)) return false;
+    if (entry.isFile() && /^manifest\.(base|chrome|firefox|edge)\.json$/.test(entry.name)) return false;
     if (entry.name === '.DS_Store') return false;
     if (entry.isFile() && entry.name === 'source-logo.png') return false;
     return true;
   });
 
   const base = await readJson(resolve(SRC, 'manifest.base.json'));
-  const override = await readJson(resolve(SRC, `manifest.${target}.json`));
+  const overlayName = MANIFEST_OVERLAY[target] || target;
+  const override = await readJson(resolve(SRC, `manifest.${overlayName}.json`));
   const manifest = mergeManifest(base, override);
 
   await fs.writeFile(

@@ -24,6 +24,29 @@
     // paid users. Cleared on sign-in, on disconnect, and when the
     // backend reports the daily 20-min quota is used up.
     GUEST_SESSION: 'guestSession',
+    // Email-verified user tier — 2 hours/day, account-scoped. Same
+    // shape as GUEST_SESSION (deviceId, sessionToken, server, remaining,
+    // quota, resetAt) but issued by /api/user-session/start under the
+    // user's JWT. Populated only after sign-in + email verification.
+    USER_SESSION: 'userSession',
+    // Two-step guest flow: tapping "Try free" sets this intent flag
+    // and routes the popup to the main view; the proxy + countdown
+    // start only when the user actually taps the Connect orb. Without
+    // this we burn the daily 20-min quota the moment they explore the
+    // app — the original UI auto-connected on the auth screen. The
+    // flag survives popup close but is cleared on sign-in (they
+    // upgraded), quota-exhausted (today is over), or session-expired.
+    GUEST_MODE_INTENT: 'guestModeIntent',
+    // Set once the first-run onboarding card has been seen + dismissed.
+    // The card explains the "browser traffic only" scope so users
+    // expecting a system-wide VPN aren't surprised on first connect.
+    ONBOARDING_SEEN: 'onboardingSeen',
+    // Best-effort cumulative connected seconds, used as the
+    // `usageMinutes` field on the uninstall-feedback survey. Updated
+    // every time disconnect() runs by adding (Date.now() -
+    // connectedAt). Lets us tell "uninstalled before ever trying" from
+    // "tried and bounced."
+    USAGE_SECONDS: 'usageSeconds',
   };
 
   var DEFAULT_SETTINGS = {
@@ -79,6 +102,8 @@
         KEYS.PROXY_CREDS,
         KEYS.CONNECTION,
         KEYS.GUEST_SESSION,
+        KEYS.USER_SESSION,
+        KEYS.GUEST_MODE_INTENT,
       ]);
     },
 
@@ -95,6 +120,32 @@
     },
     clearGuestSession: function () {
       return BX.storage.remove(KEYS.GUEST_SESSION);
+    },
+
+    getUserSession: function () {
+      return BX.storage.get(KEYS.USER_SESSION).then(function (r) {
+        return r[KEYS.USER_SESSION] || null;
+      });
+    },
+    setUserSession: function (session) {
+      var obj = {}; obj[KEYS.USER_SESSION] = session || null;
+      return BX.storage.set(obj);
+    },
+    clearUserSession: function () {
+      return BX.storage.remove(KEYS.USER_SESSION);
+    },
+
+    getGuestModeIntent: function () {
+      return BX.storage.get(KEYS.GUEST_MODE_INTENT).then(function (r) {
+        return !!r[KEYS.GUEST_MODE_INTENT];
+      });
+    },
+    setGuestModeIntent: function (value) {
+      if (value) {
+        var obj = {}; obj[KEYS.GUEST_MODE_INTENT] = true;
+        return BX.storage.set(obj);
+      }
+      return BX.storage.remove(KEYS.GUEST_MODE_INTENT);
     },
 
     getUser: function () {
@@ -158,6 +209,30 @@
         var id = 'ext-' + uuidv4();
         var obj = {}; obj[KEYS.DEVICE_UUID] = id;
         return BX.storage.set(obj).then(function () { return id; });
+      });
+    },
+
+    getOnboardingSeen: function () {
+      return BX.storage.get(KEYS.ONBOARDING_SEEN).then(function (r) {
+        return !!r[KEYS.ONBOARDING_SEEN];
+      });
+    },
+    setOnboardingSeen: function () {
+      var obj = {}; obj[KEYS.ONBOARDING_SEEN] = true;
+      return BX.storage.set(obj);
+    },
+
+    getUsageSeconds: function () {
+      return BX.storage.get(KEYS.USAGE_SECONDS).then(function (r) {
+        return Number(r[KEYS.USAGE_SECONDS]) || 0;
+      });
+    },
+    addUsageSeconds: function (delta) {
+      var d = Math.max(0, Math.min(86400, Math.floor(Number(delta) || 0)));
+      if (!d) return Promise.resolve();
+      return Storage.getUsageSeconds().then(function (cur) {
+        var obj = {}; obj[KEYS.USAGE_SECONDS] = cur + d;
+        return BX.storage.set(obj);
       });
     },
 

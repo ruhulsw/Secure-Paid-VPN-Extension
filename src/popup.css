@@ -436,8 +436,8 @@ body {
 
 .connect-orb {
   position: relative;
-  width: 150px;
-  height: 150px;
+  width: 165px;
+  height: 165px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -473,12 +473,20 @@ body {
   border: 2px solid var(--accent);
   pointer-events: none;
   opacity: 0;
+  /* Lift the pulse rings above the bezel — DOM order is aura → ring-1
+     → ring-2 → bezel, so without an explicit z-index the bezel stacks
+     on top of the rings and clips the expanding gold halo as it
+     scales out. z-index:2 layers the rings over the bezel so the
+     "expanding gold ripple" effect actually appears in front of the
+     orb's chrome. .connect-aura stays at the default (below the
+     bezel) since it's a static glow, not part of the animation. */
+  z-index: 2;
 }
 #root[data-status="connected"] .connect-ring {
   animation: orb-pulse 1.6s ease-out infinite;
 }
 .connect-ring-1 { inset: 0; }
-.connect-ring-2 { inset: 14px; animation-delay: 0.5s !important; }
+.connect-ring-2 { inset: 15px; animation-delay: 0.5s !important; }
 @keyframes orb-pulse {
   0%   { transform: scale(1);    opacity: 0.5; }
   100% { transform: scale(1.35); opacity: 0;   }
@@ -486,8 +494,8 @@ body {
 
 .connect-bezel {
   position: relative;
-  width: 146px;
-  height: 146px;
+  width: 161px;
+  height: 161px;
   border-radius: 50%;
   background: linear-gradient(135deg,
     rgba(255,255,255,0.18),
@@ -509,8 +517,8 @@ body {
 
 .connect-orb-inner {
   position: relative;
-  width: 142px;
-  height: 142px;
+  width: 157px;
+  height: 157px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--surface-alt), var(--bg-deep) 60%, #06060a);
   border: 1px solid rgba(255,255,255,0.05);
@@ -544,17 +552,41 @@ body {
   color: var(--accent);
   filter: drop-shadow(0 0 12px rgba(212,160,76,0.7));
 }
+/* While connecting, hide the power-button icon and render a proper
+   circular loading ring inside the orb (gold arc on a faint border,
+   matching the boot-view .spinner). Rotating the chunky power glyph
+   in place reads as "wobbling icon" rather than "loading" — a
+   dedicated ring is clearer. */
 #root[data-status="connecting"] .connect-icon {
-  animation: spin 1.1s linear infinite;
+  display: none;
+}
+#root[data-status="connecting"] .connect-orb-inner::after {
+  content: '';
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.08);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+  z-index: 1;
+  /* ::after renders last in DOM order — without an explicit `order`
+     the spinner would sit *below* the "Connecting…" label in the
+     column flex. order:-1 puts the pseudo ahead of the label so the
+     visual matches the disconnected layout (icon-on-top, label-below).
+     Identical behaviour on Gecko (Firefox) and Blink (Chrome / Edge)
+     per the CSS Flexbox spec on pseudo-elements as flex items. */
+  order: -1;
+  flex-shrink: 0;
 }
 
 .connect-label {
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 2px;
+  letter-spacing: 1.5px;
   color: rgba(241,241,244,0.85);
   text-transform: uppercase;
   z-index: 1;
+  white-space: nowrap;
 }
 #root[data-status="connected"] .connect-label {
   color: rgba(212,160,76,0.95);
@@ -888,4 +920,270 @@ body {
 .tab-pane::-webkit-scrollbar-thumb {
   background: var(--surface-elev);
   border-radius: 999px;
+}
+
+/* ---- First-run onboarding card ---------------------------------------
+   Full-height overlay that replaces the auth/main/locked view on first
+   open. Dismisses to whichever view the app would have shown anyway,
+   via storage.onboardingSeen. */
+.view.onboarding {
+  padding: 18px 18px 22px;
+  overflow-y: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.onb-card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 22px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.onb-icon {
+  align-self: center;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+.onb-title {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  text-align: center;
+  color: var(--text);
+}
+.onb-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.onb-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.onb-list li strong { color: var(--text); }
+.onb-bullet {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid var(--accent-line);
+}
+.onb-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---- Tier chooser ----------------------------------------------------- */
+.view.chooser {
+  padding: 22px 18px;
+  overflow-y: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.chooser-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chooser-title {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  text-align: center;
+  color: var(--text);
+}
+.chooser-sub {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.chooser-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.chooser-option:hover { border-color: var(--accent-line); }
+.chooser-option:active { transform: scale(0.99); }
+.chooser-option--primary {
+  background: linear-gradient(180deg, rgba(212,160,76,0.18), rgba(212,160,76,0.06));
+  border-color: var(--accent-line);
+}
+.chooser-option-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+.chooser-option-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chooser-option-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.chooser-option-title strong { color: var(--accent); }
+.chooser-option-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.chooser-option-chev {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.chooser-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  margin-top: 6px;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 12.5px;
+  padding: 8px 12px;
+}
+.chooser-back:hover { color: var(--text); }
+
+/* ---- Email-pending ---------------------------------------------------- */
+.view.email-pending {
+  padding: 18px 18px 22px;
+  overflow-y: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+.ep-card {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+}
+.ep-icon {
+  align-self: center;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+.ep-title {
+  margin: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--text);
+}
+.ep-sub {
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.ep-sub strong { color: var(--text); }
+.ep-msg {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--success);
+  background: rgba(110, 231, 183, 0.08);
+  border: 1px solid rgba(110, 231, 183, 0.25);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.ep-msg.ep-msg--error {
+  color: var(--danger);
+  background: rgba(247, 138, 138, 0.10);
+  border-color: rgba(247, 138, 138, 0.30);
+}
+.ep-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 0;
+}
+.ep-code-input {
+  width: 100%;
+  text-align: center;
+  font-family: 'SF Mono', 'Menlo', 'Courier New', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 10px;
+  padding: 14px 12px 14px 22px; /* extra left to compensate visual centering with letter-spacing */
+  background: var(--surface-alt);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  color: var(--text);
+  caret-color: var(--accent);
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.ep-code-input::placeholder { color: var(--text-dim); }
+.ep-code-input:focus {
+  border-color: var(--accent-line);
+  background: var(--surface);
+}
+.ep-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ep-actions .link-danger {
+  align-self: center;
+  margin-top: 4px;
 }

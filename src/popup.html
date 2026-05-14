@@ -276,6 +276,123 @@
     <section id="view-loading" class="view loading">
       <div class="spinner" aria-label="Loading"></div>
     </section>
+
+    <!-- Tier chooser. Shown when a guest-pending user (intent flag
+         set, no auth, no session) taps the Connect orb. Picks
+         between paid-with-email-verify-for-2hr/day and the no-signup
+         20-min/day path. -->
+    <section id="view-chooser" class="view chooser hidden" role="dialog" aria-labelledby="chooser-title">
+      <div class="chooser-card">
+        <h2 id="chooser-title" class="chooser-title">Pick how to connect</h2>
+        <p class="chooser-sub">Free either way — one needs an email.</p>
+
+        <button type="button" class="chooser-option chooser-option--primary" id="chooser-signup">
+          <span class="chooser-option-icon">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>
+          </span>
+          <span class="chooser-option-body">
+            <span class="chooser-option-title">Sign up — <strong>2 hours/day</strong></span>
+            <span class="chooser-option-sub">Verify your email, unlock all servers</span>
+          </span>
+          <svg class="chooser-option-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+
+        <button type="button" class="chooser-option" id="chooser-guest">
+          <span class="chooser-option-icon">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L3 14h7l-2 8 10-12h-7l2-8z"/></svg>
+          </span>
+          <span class="chooser-option-body">
+            <span class="chooser-option-title"><span class="btn-label">Continue free — 20 min/day</span></span>
+            <span class="chooser-option-sub">No signup, no email, just connect</span>
+          </span>
+          <svg class="chooser-option-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+
+        <button type="button" class="link chooser-back" id="chooser-back">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Back
+        </button>
+      </div>
+    </section>
+
+    <!-- Email-pending. Shown for any signed-in user whose
+         emailVerified flag is still false. We emailed a 6-digit
+         code; the user types it into the input below. -->
+    <section id="view-email-pending" class="view email-pending hidden" role="dialog" aria-labelledby="ep-title">
+      <div class="ep-card">
+        <div class="ep-icon">
+          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+        </div>
+        <h2 id="ep-title" class="ep-title">Check your email</h2>
+        <p class="ep-sub">We sent a 6-digit code to <strong id="email-pending-address">your inbox</strong>. Enter it below to unlock 2 hours/day on every server.</p>
+        <form id="email-pending-form" class="ep-form" autocomplete="off">
+          <input type="text"
+                 id="email-pending-code"
+                 class="ep-code-input"
+                 inputmode="numeric"
+                 pattern="[0-9]{6}"
+                 maxlength="6"
+                 autocomplete="one-time-code"
+                 placeholder="000000"
+                 aria-label="6-digit verification code"
+                 required />
+          <div id="email-pending-msg" class="ep-msg" hidden></div>
+          <button type="submit" class="btn btn-primary" id="email-pending-verify">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span class="btn-label">Verify</span>
+          </button>
+        </form>
+        <div class="ep-actions">
+          <button type="button" class="btn btn-ghost" id="email-pending-resend">
+            <span class="btn-label">Resend code</span>
+          </button>
+          <button type="button" class="link link-danger" id="email-pending-change">Use a different email</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- First-run onboarding card.
+         Shown once, gated by storage.onboardingSeen. The "browser-only"
+         scope is the #1 source of confused uninstalls — users install
+         expecting a system-wide VPN, can't access their iMessage / app
+         / anything outside the browser, and remove it. This card sets
+         the expectation up-front and offers the desktop app as the
+         right tool for that need. -->
+    <section id="view-onboarding" class="view onboarding hidden" role="dialog" aria-labelledby="onboarding-title">
+      <div class="onb-card">
+        <div class="onb-icon">
+          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2.5" y="5" width="19" height="13" rx="2"/>
+            <path d="M7 21h10M12 18v3"/>
+            <circle cx="12" cy="11" r="2.5"/>
+            <path d="M9 14a3 3 0 016 0"/>
+          </svg>
+        </div>
+        <h2 id="onboarding-title" class="onb-title">Welcome — quick heads-up</h2>
+        <ul class="onb-list">
+          <li>
+            <span class="onb-bullet">1</span>
+            <span><strong>Browser traffic only.</strong> This extension secures what your browser does. Apps like Slack, iMessage, or Steam keep using your normal connection.</span>
+          </li>
+          <li>
+            <span class="onb-bullet">2</span>
+            <span><strong>Whole computer?</strong> Install the SecurePaid VPN desktop app — one account works on every device.</span>
+          </li>
+          <li>
+            <span class="onb-bullet">3</span>
+            <span><strong>Free tier:</strong> 20 minutes/day with no signup. Sign up for more — premium is unlimited.</span>
+          </li>
+        </ul>
+        <div class="onb-actions">
+          <button type="button" class="btn btn-primary" id="onboarding-done">
+            <span class="btn-label">Got it — let's go</span>
+          </button>
+          <button type="button" class="btn btn-ghost" id="onboarding-get-app">
+            <span class="btn-label">Get the desktop app</span>
+          </button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script src="lib/browser.js"></script>

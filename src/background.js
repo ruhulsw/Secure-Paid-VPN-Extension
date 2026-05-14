@@ -168,10 +168,25 @@
 
   function disconnect(reason) {
     var clearError = null;
-    return ProxyCtl.clear()
+    // Snapshot the live session length BEFORE we clear it, so the
+    // uninstall-feedback "usageMinutes" reflects time-actually-used
+    // and not just installs-with-zero-connects.
+    var sessionStartedAt = null;
+    return Storage.getConnection().then(function (conn) {
+      if (conn && conn.status === 'connected' && conn.connectedAt) {
+        sessionStartedAt = conn.connectedAt;
+      }
+      return ProxyCtl.clear();
+    })
       .catch(function (err) {
         console.error('[bg] disconnect: ProxyCtl.clear failed:', err && err.message, err);
         clearError = err;
+      })
+      .then(function () {
+        if (sessionStartedAt) {
+          var seconds = Math.max(0, Math.floor((Date.now() - sessionStartedAt) / 1000));
+          return Storage.addUsageSeconds(seconds);
+        }
       })
       .then(function () {
         var connState = clearError
@@ -299,16 +314,47 @@
     });
   }
 
-  // Heartbeat alarm. MV3 service workers can't keep a setInterval going
-  // (they get killed after ~30s idle), so we use BX.alarms which the
-  // browser persists across SW restarts. Period = 0.5 min (30s) — the
-  // smallest Chromium permits — so disconnect lands within ~30s of
-  // quota expiry. The backend caps secondsElapsed at 120s server-side,
-  // which means a long SW sleep can't burn through the whole quota in
-  // one report.
+  // Generic guard for recurring alarms. Calling alarms.create with a
+  // name that already exists REPLACES the existing alarm and resets
+  // its next firing time — so a SW that restarts every <period (which
+  // is common in MV3, ~30s idle eviction) would keep resetting the
+  // heartbeat timer and it would never fire. Always check first.
+  //
+  // The Promise-vs-callback split mirrors the rest of this file:
+  // Firefox's `alarms.get` is Promise-only and silently drops a
+  // callback argument, while older Chromium builds only accept the
+  // callback form. The .catch on the Promise path is a defensive
+  // create — alarms.get failures are rare but we shouldn't lose the
+  // alarm because of one.
+  function ensureRecurringAlarm(name, periodInMinutes) {
+    if (!BX.alarms || !BX.alarms.get || !BX.alarms.create) return;
+    function maybeCreate(existing) {
+      if (existing) return;
+      try { BX.alarms.create(name, { periodInMinutes: periodInMinutes }); } catch (_) {}
+    }
+    try {
+      var ret = BX.alarms.get(name);
+      if (ret && typeof ret.then === 'function') {
+        ret.then(maybeCreate).catch(function () {
+          try { BX.alarms.create(name, { periodInMinutes: periodInMinutes }); } catch (_) {}
+        });
+        return;
+      }
+      BX.alarms.get(name, maybeCreate);
+    } catch (_) {
+      try { BX.alarms.create(name, { periodInMinutes: periodInMinutes }); } catch (__) {}
+    }
+  }
+
+  // Heartbeat alarms. MV3 service workers can't keep a setInterval
+  // going (they get killed after ~30s idle), so we use BX.alarms which
+  // the browser persists across SW restarts. Period = 0.5 min (30s) —
+  // the smallest Chromium permits — so disconnect lands within ~30s
+  // of quota expiry. The backend caps secondsElapsed at 120s
+  // server-side, so a long SW sleep can't burn through the whole
+  // quota in one report.
   function ensureGuestHeartbeatAlarm() {
-    if (!BX.alarms || !BX.alarms.create) return;
-    try { BX.alarms.create('guest-heartbeat', { periodInMinutes: 0.5 }); } catch (_) {}
+    ensureRecurringAlarm('guest-heartbeat', 0.5);
   }
 
   function clearGuestHeartbeatAlarm() {
@@ -352,9 +398,193 @@
     });
   }
 
+  // ---- Email-verified user tier (2 hours/day) ----------------------------
+  //
+  // Same wire shape as guestConnect — backend keys quota by userId so we
+  // don't need a deviceId here, the JWT in the Authorization header does
+  // the work. Heartbeat alarm 'user-heartbeat' runs at the same 30-sec
+  // cadence as the guest tier's; both can be active concurrently in
+  // theory, but the UI gates a user from being in both at once.
+  //
+  // Tier transitions (emailVerified flips, premium kicks in, etc.) cause
+  // the popup to tear this session down via userDisconnect.
+  function userConnect() {
+    console.log('[bg] userConnect() begin');
+    return configureApi().then(function (cfg) {
+      if (!cfg.token) {
+        var err = new Error('Sign in first');
+        err.code = 'NOT_AUTHENTICATED';
+        throw err;
+      }
+      return ProxyCtl.clear().catch(function () {})
+        .then(function () {
+          return Storage.setConnection({ status: 'connecting', startedAt: Date.now(), userTier: true })
+            .then(function () { broadcastState(); });
+        })
+        .then(function () {
+          console.log('[bg] requesting user-tier session');
+          return api.userSessionStart();
+        })
+        .then(function (resp) {
+          if (!resp.proxy) {
+            throw new Error('Email-tier proxy is not available on this exit node — try again shortly.');
+          }
+          var proxy = resp.proxy;
+          var bypass = (resp.proxy && resp.proxy.bypassList) || [];
+          return ProxyCtl.apply(proxy, bypass).then(function () {
+            console.log('[bg] user-tier proxy applied');
+            var userSession = {
+              sessionToken: resp.sessionToken,
+              server: resp.server,
+              remainingSeconds: resp.remainingSeconds,
+              quotaSeconds: resp.quotaSeconds,
+              resetAt: resp.resetAt,
+              connectedAt: Date.now(),
+              lastHeartbeatAt: Date.now(),
+            };
+            var conn = {
+              status: 'connected',
+              userTier: true,
+              serverId: resp.server.id,
+              server: resp.server,
+              proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
+              connectedAt: Date.now(),
+            };
+            return Promise.all([
+              Storage.setUserSession(userSession),
+              Storage.setConnection(conn),
+            ]).then(function () {
+              setBadge('2H', '#d4a04c');
+              broadcastState();
+              ensureUserHeartbeatAlarm();
+              notify(
+                'Connected',
+                'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
+                  '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
+              );
+              updatePublicIp({ force: true });
+              return conn;
+            });
+          });
+        })
+        .catch(function (err) {
+          console.error('[bg] userConnect() failed:', err && err.name, err && err.message);
+          return ProxyCtl.clear().catch(function () {})
+            .then(function () {
+              return Storage.setConnection({
+                status: 'error',
+                userTier: true,
+                error: err && err.message ? err.message : String(err),
+                code: err && err.code,
+                at: Date.now(),
+              });
+            })
+            .then(function () {
+              setBadge('', '#000000');
+              broadcastState();
+              throw err;
+            });
+        });
+    });
+  }
+
+  function ensureUserHeartbeatAlarm() {
+    ensureRecurringAlarm('user-heartbeat', 0.5);
+  }
+
+  function clearUserHeartbeatAlarm() {
+    if (!BX.alarms || !BX.alarms.clear) return;
+    try { BX.alarms.clear('user-heartbeat'); } catch (_) {}
+  }
+
+  function userHeartbeatTick() {
+    return Storage.getUserSession().then(function (session) {
+      if (!session || !session.sessionToken) {
+        clearUserHeartbeatAlarm();
+        return;
+      }
+      return configureApi().then(function () {
+        var now = Date.now();
+        var elapsed = Math.max(1, Math.round((now - (session.lastHeartbeatAt || now)) / 1000));
+        return api.userSessionHeartbeat(session.sessionToken, elapsed)
+          .then(function (resp) {
+            session.remainingSeconds = resp.remainingSeconds;
+            session.lastHeartbeatAt = now;
+            session.resetAt = resp.resetAt || session.resetAt;
+            return Storage.setUserSession(session).then(function () {
+              if (resp.disconnect) {
+                return userDisconnect('quota-exhausted').then(function () {
+                  notify("Today's 2 hours are used up",
+                    'Quota resets at midnight UTC. Subscribe for unlimited.');
+                });
+              }
+              broadcastState();
+            });
+          })
+          .catch(function (err) {
+            console.warn('[bg] user heartbeat failed:', err && err.code, err && err.message);
+            if (err && (err.code === 'USER_SESSION_INVALID' || err.status === 401)) {
+              return userDisconnect('session-expired');
+            }
+          });
+      });
+    });
+  }
+
+  function userDisconnect(reason) {
+    var clearError = null;
+    var sessionStartedAt = null;
+    return Storage.getConnection().then(function (conn) {
+      if (conn && conn.status === 'connected' && conn.connectedAt) {
+        sessionStartedAt = conn.connectedAt;
+      }
+      return Storage.getUserSession();
+    }).then(function (session) {
+      var ended = (session && session.sessionToken)
+        ? configureApi().then(function () {
+            return api.userSessionEnd(session.sessionToken).catch(function () {});
+          })
+        : Promise.resolve();
+      return ended.then(function () {
+        return ProxyCtl.clear().catch(function (err) { clearError = err; });
+      });
+    }).then(function () {
+      if (sessionStartedAt) {
+        var seconds = Math.max(0, Math.floor((Date.now() - sessionStartedAt) / 1000));
+        return Storage.addUsageSeconds(seconds);
+      }
+    }).then(function () {
+      clearUserHeartbeatAlarm();
+      var connState = clearError
+        ? {
+            status: 'error',
+            error: 'Failed to release proxy: ' + (clearError.message || String(clearError)),
+            at: Date.now(),
+          }
+        : { status: 'disconnected', reason: reason || null, at: Date.now() };
+      return Promise.all([
+        Storage.clearUserSession(),
+        Storage.setConnection(connState),
+      ]);
+    }).then(function () {
+      setBadge(clearError ? '!' : '', clearError ? '#f78a8a' : '#000000');
+      broadcastState();
+      if (!clearError && (reason === 'user' || reason == null)) {
+        reloadHttpTabs();
+        notify('Disconnected', 'Browser is now using its direct connection.');
+      }
+    });
+  }
+
   function guestDisconnect(reason) {
     var clearError = null;
-    return Storage.getGuestSession().then(function (session) {
+    var sessionStartedAt = null;
+    return Storage.getConnection().then(function (conn) {
+      if (conn && conn.status === 'connected' && conn.connectedAt) {
+        sessionStartedAt = conn.connectedAt;
+      }
+      return Storage.getGuestSession();
+    }).then(function (session) {
       // Best-effort end-call — failures here just leave the row to
       // expire on its own when its TTL fires.
       var ended = (session && session.sessionToken)
@@ -366,6 +596,11 @@
         return ProxyCtl.clear().catch(function (err) { clearError = err; });
       });
     }).then(function () {
+      if (sessionStartedAt) {
+        var seconds = Math.max(0, Math.floor((Date.now() - sessionStartedAt) / 1000));
+        return Storage.addUsageSeconds(seconds);
+      }
+    }).then(function () {
       clearGuestHeartbeatAlarm();
       var connState = clearError
         ? {
@@ -374,9 +609,17 @@
             at: Date.now(),
           }
         : { status: 'disconnected', reason: reason || null, at: Date.now() };
+      // Only drop the guest-mode-intent flag when the trial is over
+      // for the day (quota) or the backend lost our session — on a
+      // user-initiated disconnect the user is likely to want to
+      // reconnect, so leave them on the main view.
+      var clearIntent = (reason === 'quota-exhausted' || reason === 'session-expired')
+        ? Storage.setGuestModeIntent(false)
+        : Promise.resolve();
       return Promise.all([
         Storage.clearGuestSession(),
         Storage.setConnection(connState),
+        clearIntent,
       ]);
     }).then(function () {
       setBadge(clearError ? '!' : '', clearError ? '#f78a8a' : '#000000');
@@ -482,7 +725,52 @@
   }
 
   function broadcastState() {
+    // Tier / version / usage may have shifted — keep the post-uninstall
+    // survey URL in sync. Fire-and-forget; never block the broadcast.
+    updateUninstallUrl();
     BX.runtime.sendMessage({ type: 'state-changed' }).catch(function () { /* no listeners is fine */ });
+  }
+
+  // ---- Uninstall-feedback URL -------------------------------------------
+  // chrome.runtime.setUninstallURL fires the URL exactly once after the
+  // user removes the extension, with no payload control beyond the
+  // querystring. We prefill the survey form with diagnostic context the
+  // user can't supply themselves (their tier, version, how long they
+  // actually used it) so a one-question form is enough.
+  //
+  // Tier mapping mirrors the future email-verified middle tier:
+  //   - anonymous : never signed in
+  //   - email     : signed in, not premium (today: locked screen, soon: 2h/day)
+  //   - premium   : signed in + active subscription
+  //
+  // Called on every state change because the user's tier can shift
+  // mid-session (sign in, subscription expires, etc.) and the API
+  // doesn't give us a "current state" hook — easier to just rewrite the
+  // URL each time something material moved.
+  function updateUninstallUrl() {
+    if (!BX.runtime || typeof BX.runtime.setUninstallURL !== 'function') return Promise.resolve();
+    return Promise.all([
+      Storage.getAuthToken(),
+      Storage.getPremium(),
+      Storage.getOrCreateDeviceUuid(),
+      Storage.getUsageSeconds(),
+      Storage.getSettings(),
+    ]).then(function (r) {
+      var token = r[0];
+      var premium = r[1];
+      var deviceUuid = r[2];
+      var usageSeconds = r[3];
+      var settings = r[4];
+      var tier = !token ? 'anonymous' : (premium.isPremium ? 'premium' : 'email');
+      var version = (BX.runtime.getManifest && BX.runtime.getManifest().version) || '';
+      var base = (settings.apiBase || 'https://securepaidvpn.com').replace(/\/+$/, '');
+      var url = base + '/uninstall-feedback' +
+        '?d=' + encodeURIComponent(deviceUuid) +
+        '&t=' + encodeURIComponent(tier) +
+        '&v=' + encodeURIComponent(version) +
+        '&u=' + Math.floor((usageSeconds || 0) / 60);
+      try { BX.runtime.setUninstallURL(url); } catch (_) {}
+    }).catch(function () { /* never let URL update break anything */ });
   }
 
   // ---- Periodic premium re-check -----------------------------------------
@@ -493,44 +781,23 @@
   // for a non-paying user.
 
   function ensureAlarm() {
-    if (!BX.alarms || !BX.alarms.get || !BX.alarms.create) return;
-
-    // Cross-browser: Firefox's `browser.alarms.get` is Promise-only and
-    // silently drops a callback argument — the previous callback-style
-    // version meant the alarm was *never* registered on Firefox, so the
-    // 15-minute premium re-check never fired and an expired subscription
-    // would keep tunneling traffic indefinitely. We detect the Promise
-    // return shape and fall back to the callback form for safety.
-    //
-    // We check existence before re-creating because alarms.create() with
-    // a duplicate name *replaces* the existing alarm — resetting the
-    // 15-minute timer on every SW wake-up means the alarm could go
-    // months without firing if the SW restarts often, which it does in
-    // MV3.
-    function maybeCreate(existing) {
-      if (existing) return;
-      try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (_) {}
-    }
-    try {
-      var ret = BX.alarms.get('premium-refresh');
-      if (ret && typeof ret.then === 'function') {
-        ret.then(maybeCreate).catch(function () {
-          // alarms.get failing is rare; create defensively so we still
-          // get the periodic re-check.
-          try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (_) {}
-        });
-        return;
-      }
-      BX.alarms.get('premium-refresh', maybeCreate);
-    } catch (_) {
-      try { BX.alarms.create('premium-refresh', { periodInMinutes: 15 }); } catch (__) {}
-    }
+    // Premium-refresh poll — 15 minute period. Uses the same
+    // get-then-create guard ensureRecurringAlarm provides; if we
+    // skipped the guard, a fast SW restart cycle would reset the
+    // 15-min timer on every wake and the alarm could go indefinitely
+    // without firing, which is how an expired subscription would keep
+    // tunneling traffic.
+    ensureRecurringAlarm('premium-refresh', 15);
   }
 
   if (BX.alarms && BX.alarms.onAlarm) {
     BX.alarms.onAlarm.addListener(function (alarm) {
       if (alarm.name === 'guest-heartbeat') {
         guestHeartbeatTick().catch(function () { /* ignore — next tick retries */ });
+        return;
+      }
+      if (alarm.name === 'user-heartbeat') {
+        userHeartbeatTick().catch(function () { /* ignore */ });
         return;
       }
       if (alarm.name !== 'premium-refresh') return;
@@ -565,6 +832,9 @@
         Storage.getServers(),
         Storage.getSettings(),
         Storage.getGuestSession(),
+        Storage.getOnboardingSeen(),
+        Storage.getGuestModeIntent(),
+        Storage.getUserSession(),
       ]).then(function (r) {
         return {
           isAuthenticated: !!r[0],
@@ -577,7 +847,72 @@
           serversFetchedAt: r[5].fetchedAt,
           settings: r[6],
           guestSession: r[7],
+          onboardingSeen: r[8],
+          guestModeIntent: r[9],
+          userSession: r[10],
         };
+      });
+    },
+
+    'set-onboarding-seen': function () {
+      return Storage.setOnboardingSeen().then(function () {
+        broadcastState();
+        return { ok: true };
+      });
+    },
+
+    // Combined onboarding dismissal + enter guest-mode intent. Atomic
+    // from the popup's perspective so render() doesn't flash through
+    // an intermediate auth view between onboardingSeen flipping true
+    // and guestModeIntent landing.
+    'dismiss-onboarding-to-main': function () {
+      return Promise.all([
+        Storage.setOnboardingSeen(),
+        Storage.setGuestModeIntent(true),
+      ]).then(function () {
+        broadcastState();
+        return { ok: true };
+      });
+    },
+
+    // Resend the verification email. Backend gates auth + rate-limit.
+    'resend-verify-email': function () {
+      return configureApi().then(function () {
+        return api.resendVerify();
+      });
+    },
+
+    // Submit the 6-digit OTP the user typed into the popup. On
+    // success the backend flips emailVerified=true; we refresh /me
+    // so state.user.emailVerified updates and render() routes the
+    // popup onward to the locked/main view.
+    'submit-verify-code': function (msg) {
+      return configureApi().then(function () {
+        return api.verifyEmailCode(msg && msg.code);
+      }).then(function (resp) {
+        return refreshMe().then(function () {
+          broadcastState();
+          return resp;
+        });
+      });
+    },
+
+    // User tapped "Try free" on the auth screen — flips them to the
+    // main view but does NOT start the proxy. The session (and its
+    // 20-min countdown) only kicks in when they tap Connect; see the
+    // popup's connect-button handler for the second step. Without this
+    // split, the trial timer was already burning before the user had
+    // even seen the connect orb.
+    'guest-mode-enter': function () {
+      return Storage.setGuestModeIntent(true).then(function () {
+        broadcastState();
+        return { ok: true };
+      });
+    },
+    'guest-mode-exit': function () {
+      return Storage.setGuestModeIntent(false).then(function () {
+        broadcastState();
+        return { ok: true };
       });
     },
 
@@ -589,6 +924,10 @@
           Storage.setAuthToken(resp.token),
           Storage.setUser(resp.user),
           Storage.setPremium(!!resp.isPremium, resp.subscription || null),
+          // Signing in graduates the user out of guest mode — drop
+          // the intent flag so the next render doesn't route them
+          // back to the free-trial home view.
+          Storage.setGuestModeIntent(false),
         ]).then(function () {
           api.configure(undefined, resp.token);
           return refreshServers().catch(function () { /* non-fatal */ });
@@ -607,6 +946,7 @@
           Storage.setAuthToken(resp.token),
           Storage.setUser(resp.user),
           Storage.setPremium(!!resp.isPremium, resp.subscription || null),
+          Storage.setGuestModeIntent(false),
         ]).then(function () {
           api.configure(undefined, resp.token);
           return refreshServers().catch(function () { /* non-fatal */ });
@@ -650,14 +990,25 @@
     },
 
     'disconnect': function () {
-      return Storage.getGuestSession().then(function (session) {
-        if (session && session.sessionToken) return guestDisconnect('user');
-        return disconnect('user');
+      return Storage.getUserSession().then(function (userSess) {
+        if (userSess && userSess.sessionToken) return userDisconnect('user');
+        return Storage.getGuestSession().then(function (session) {
+          if (session && session.sessionToken) return guestDisconnect('user');
+          return disconnect('user');
+        });
       });
     },
 
     'guest-start': function () {
       return guestConnect();
+    },
+
+    // Email-verified user-tier (2 hours/day) start. JWT-authed; the
+    // backend's /api/user-session/start gates on emailVerified=true
+    // and returns 403 EMAIL_NOT_VERIFIED for accounts that haven't
+    // completed the OTP yet.
+    'user-session-start': function () {
+      return userConnect();
     },
 
     'set-settings': function (msg) {
@@ -677,12 +1028,48 @@
       });
     },
 
+    // Strict allowlist for open-page. Earlier versions accepted any
+    // /^https?:\/\// URL as a path, which would have been a phishing
+    // vector if a content script (we don't have any today, but the
+    // architecture allowed it) or a future call-site ever passed an
+    // attacker-controlled URL: the user would see a SecurePaid-branded
+    // popup launch a tab to an arbitrary host. Now: only known
+    // marketing / dashboard paths on our own origin are allowed; the
+    // path is matched against this set after stripping query +
+    // fragment, and the host is locked to settings.apiBase.
     'open-page': function (msg) {
+      var ALLOWED_PATHS = {
+        '/': 1,
+        '/pricing': 1,
+        '/help': 1,
+        '/download': 1,
+        '/forgot': 1,
+        '/privacy': 1,
+        '/terms': 1,
+        '/data-deletion': 1,
+        '/features': 1,
+        '/dashboard': 1,
+        '/dashboard/subscription': 1,
+        '/dashboard/subscribe': 1,
+        '/dashboard/devices': 1,
+        '/dashboard/profile': 1,
+        '/login': 1,
+        '/signup': 1,
+        '/verify-email-code': 1,
+      };
       return configureApi().then(function (cfg) {
-        var base = cfg.settings.apiBase || 'https://securepaidvpn.com';
-        var url = msg.path && /^https?:\/\//i.test(msg.path)
-          ? msg.path
-          : (base.replace(/\/+$/, '') + (msg.path || '/'));
+        var base = (cfg.settings.apiBase || 'https://securepaidvpn.com').replace(/\/+$/, '');
+        var rawPath = String((msg && msg.path) || '/');
+        // Strip query + fragment for the allowlist check; preserve them
+        // on the final URL so e.g. /dashboard/subscribe?plan=yearly
+        // continues to work.
+        var canonical = rawPath.split('?')[0].split('#')[0];
+        if (!ALLOWED_PATHS[canonical]) {
+          var err = new Error('Path not allowed: ' + canonical);
+          err.code = 'OPEN_PAGE_DENIED';
+          throw err;
+        }
+        var url = base + (rawPath[0] === '/' ? rawPath : '/' + rawPath);
         BX.tabs.create({ url: url });
         return { ok: true };
       });
@@ -704,6 +1091,18 @@
 
   BX.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     if (!msg || !msg.type) return false;
+    // Reject anything not originating from our own extension's
+    // contexts (popup.js, options.js). Today we ship no content
+    // scripts, but the moment one's added, an unvalidated listener
+    // would let any page on <all_urls> trigger connect / disconnect /
+    // login / logout / open-page. sender.id is set by the browser to
+    // the originating extension's ID for same-extension runtime
+    // messages; mismatched or missing IDs are reject candidates.
+    var ownId = (BX.raw && BX.raw.runtime && BX.raw.runtime.id) || null;
+    if (ownId && sender && sender.id && sender.id !== ownId) {
+      try { sendResponse({ ok: false, error: 'sender not authorized' }); } catch (_) {}
+      return false;
+    }
     var handler = handlers[msg.type];
     if (!handler) {
       sendResponse({ error: 'Unknown message: ' + msg.type });
@@ -755,6 +1154,7 @@
     STATE.bootstrapped = true;
     ensureAlarm();
     ProxyCtl.installAuthListener();
+    updateUninstallUrl();
     configureApi().then(function (cfg) {
       // Reconcile the persisted connection status against the browser's
       // *actual* proxy state. The SW gets terminated aggressively in MV3
@@ -831,6 +1231,9 @@
       // with the same name is replaced) so this is safe everywhere.
       Storage.getGuestSession().then(function (session) {
         if (session && session.sessionToken) ensureGuestHeartbeatAlarm();
+      });
+      Storage.getUserSession().then(function (session) {
+        if (session && session.sessionToken) ensureUserHeartbeatAlarm();
       });
     });
   }

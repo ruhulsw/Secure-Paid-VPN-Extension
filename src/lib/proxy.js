@@ -86,7 +86,11 @@
       },
     };
 
-    console.log('[proxy] setting', scheme + '://' + proxy.host + ':' + proxy.port,
+    // console.debug — keeps the proxy host:port out of default
+    // devtools output (level "verbose"), so users pasting support-
+    // ticket logs don't leak their exit node. Show with the Verbose
+    // filter enabled when debugging.
+    console.debug('[proxy] setting', scheme + '://' + proxy.host + ':' + proxy.port,
                 'bypass=', mergedBypass.join(','));
 
     return new Promise(function (resolve, reject) {
@@ -283,6 +287,35 @@
       proxyDNS: pacType === 'socks',
     };
 
+    // HTTPS/HTTP proxies: the `username` and `password` fields above are
+    // documented as SOCKS-only — Firefox ignores them for HTTP-tunnelled
+    // proxies. Auth happens either via the `proxyAuthorizationHeader`
+    // field of ProxyInfo (pre-baked Basic auth on the CONNECT) or via
+    // webRequest.onAuthRequired answering the proxy's 407 challenge.
+    // Relying on the onAuthRequired round-trip alone was the latent bug
+    // that surfaced as "popup says Connected but my real IP still shows"
+    // on Firefox: any race between the listener registration and the
+    // first proxied request (background-script fetches that fire
+    // immediately after ProxyCtl.apply resolves are the canonical
+    // example) caused the 407 to fall through to direct browsing. Pre-
+    // baking the header here closes that race — the first CONNECT
+    // already carries Proxy-Authorization, no 407 round-trip needed.
+    // The onAuthRequired listener stays registered as a defence-in-
+    // depth fallback for proxies that ignore the header (none we know
+    // of, but cheap insurance).
+    if ((pacType === 'http' || pacType === 'https') && proxy.username) {
+      try {
+        // btoa wants Latin-1 — wrap in encodeURIComponent/unescape so
+        // non-ASCII creds (unlikely with our nano-id alphabet, but
+        // defensive) don't throw.
+        var pair = proxy.username + ':' + (proxy.password || '');
+        var b64 = btoa(unescape(encodeURIComponent(pair)));
+        firefoxProxyInfo.proxyAuthorizationHeader = 'Basic ' + b64;
+      } catch (e) {
+        console.warn('[proxy] firefox: could not pre-bake Proxy-Authorization', e && e.message);
+      }
+    }
+
     var isBypassed = buildBypassMatcher(bypassList);
 
     if (firefoxListener) {
@@ -297,7 +330,11 @@
       return firefoxProxyInfo;
     };
 
-    console.log('[proxy] firefox: registering proxy.onRequest →',
+    // console.debug instead of .log so the proxy host:port doesn't
+    // appear by default when users paste their devtools output into
+    // support tickets. Verbose-level filters in chrome://inspect /
+    // about:debugging surface it when we need it.
+    console.debug('[proxy] firefox: registering proxy.onRequest →',
       pacType + '://' + proxy.host + ':' + proxy.port);
     BX.raw.proxy.onRequest.addListener(firefoxListener, { urls: ['<all_urls>'] });
 

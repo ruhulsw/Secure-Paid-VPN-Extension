@@ -8,6 +8,7 @@
     "build": "node tools/build.mjs",
     "build:chrome": "node tools/build.mjs chrome",
     "build:firefox": "node tools/build.mjs firefox",
+    "build:edge": "node tools/build.mjs edge",
     "icons": "node tools/make-icons.mjs",
     "package": "node tools/build.mjs && node tools/zip.mjs",
     "clean": "rm -rf dist"

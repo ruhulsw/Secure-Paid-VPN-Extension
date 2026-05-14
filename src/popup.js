@@ -16,6 +16,24 @@
     viewLocked:  $('view-locked'),
     viewMain:    $('view-main'),
     viewLoading: $('view-loading'),
+    viewOnboarding: $('view-onboarding'),
+    onboardingDone: $('onboarding-done'),
+    onboardingGetApp: $('onboarding-get-app'),
+    // Tier chooser — shown when a guest-pending user taps the orb.
+    viewChooser: $('view-chooser'),
+    chooserSignup: $('chooser-signup'),
+    chooserGuest: $('chooser-guest'),
+    chooserBack: $('chooser-back'),
+    // Email-pending — shown after signup. The user got a 6-digit code
+    // in their inbox and types it into the input below.
+    viewEmailPending: $('view-email-pending'),
+    emailPendingAddress: $('email-pending-address'),
+    emailPendingForm: $('email-pending-form'),
+    emailPendingCode: $('email-pending-code'),
+    emailPendingVerify: $('email-pending-verify'),
+    emailPendingResend: $('email-pending-resend'),
+    emailPendingChange: $('email-pending-change'),
+    emailPendingMsg: $('email-pending-msg'),
     brandSub:    $('brand-sub'),
     statusPill:  $('status-pill'),
 
@@ -83,6 +101,14 @@
   var activeTab = 'home';
   var searchQuery = '';
   var uptimeTimer = null;
+  // While true, the popup ignores `state-changed` broadcasts so the
+  // user doesn't see intermediate views flicker by during a multi-step
+  // flow (onboarding-dismiss → guest-start fires several broadcasts:
+  // onboardingSeen flip, status='connecting', status='connected'. The
+  // middle one transiently looks like the auth view because
+  // guestSession isn't set yet). Set true before the chain, cleared
+  // in the final .then().
+  var renderLocked = false;
 
   // ---- Messaging ---------------------------------------------------------
 
@@ -107,24 +133,48 @@
   // ---- View routing ------------------------------------------------------
 
   function setActiveView(name) {
-    [els.viewAuth, els.viewLocked, els.viewMain, els.viewLoading].forEach(function (v) {
-      v.classList.add('hidden');
+    [els.viewAuth, els.viewLocked, els.viewMain, els.viewLoading, els.viewOnboarding,
+     els.viewChooser, els.viewEmailPending].forEach(function (v) {
+      if (v) v.classList.add('hidden');
     });
     var v = name === 'auth' ? els.viewAuth
           : name === 'locked' ? els.viewLocked
           : name === 'main' ? els.viewMain
+          : name === 'onboarding' ? els.viewOnboarding
+          : name === 'chooser' ? els.viewChooser
+          : name === 'email-pending' ? els.viewEmailPending
           : els.viewLoading;
-    v.classList.remove('hidden');
+    if (v) v.classList.remove('hidden');
 
     var isMain = name === 'main';
     var isGuest = !!(state && state.guestSession);
+    var isGuestPending = !!(state && state.guestModeIntent && !state.guestSession && !state.isAuthenticated);
+    var isUserTierConnected = !!(state && state.userSession);
+    var isUserTierPending = !!(
+      state && state.isAuthenticated && state.user && state.user.emailVerified === true &&
+      !state.isPremium && !state.userSession
+    );
     els.statusPill.hidden = !isMain;
-    // Header sub-line: "Premium · Unlimited" for paid users,
-    // "Free trial · MM:SS left" for guests, hidden otherwise.
-    if (isMain && isGuest) {
+    // Header sub-line:
+    //   - Premium · Unlimited (paid)
+    //   - Email plan · HH:MM:SS left (verified user, 2hr countdown)
+    //   - Email plan · 2 hours/day available (verified, not yet connected)
+    //   - Free trial · MM:SS left (anonymous session, 20-min countdown)
+    //   - Free trial · 20 min/day available (intent set, not yet connected)
+    if (isMain && isUserTierConnected) {
+      var userRemaining = computeUserRemainingSeconds();
+      els.brandSub.hidden = false;
+      els.brandSub.textContent = 'Email plan · ' + formatHhMmSs(userRemaining) + ' left today';
+    } else if (isMain && isUserTierPending) {
+      els.brandSub.hidden = false;
+      els.brandSub.textContent = 'Email plan · 2 hours/day available';
+    } else if (isMain && isGuest) {
       var remaining = computeGuestRemainingSeconds();
       els.brandSub.hidden = false;
       els.brandSub.textContent = 'Free trial · ' + formatMmSs(remaining) + ' left today';
+    } else if (isMain && isGuestPending) {
+      els.brandSub.hidden = false;
+      els.brandSub.textContent = 'Free trial · 20 min/day available';
     } else {
       els.brandSub.hidden = !isMain || !(state && state.isPremium);
       if (isMain && state && state.isPremium) els.brandSub.textContent = 'Premium · Unlimited';
@@ -140,6 +190,24 @@
     var s = state.guestSession;
     var elapsedSinceHeartbeat = Math.max(0, Math.floor((Date.now() - (s.lastHeartbeatAt || Date.now())) / 1000));
     return Math.max(0, (s.remainingSeconds || 0) - elapsedSinceHeartbeat);
+  }
+
+  // Same shape for the email-verified user tier (2 hours/day).
+  function computeUserRemainingSeconds() {
+    if (!state || !state.userSession) return 0;
+    var s = state.userSession;
+    var elapsedSinceHeartbeat = Math.max(0, Math.floor((Date.now() - (s.lastHeartbeatAt || Date.now())) / 1000));
+    return Math.max(0, (s.remainingSeconds || 0) - elapsedSinceHeartbeat);
+  }
+
+  function formatHhMmSs(totalSeconds) {
+    var t = Math.max(0, Math.floor(totalSeconds || 0));
+    var h = Math.floor(t / 3600);
+    var m = Math.floor((t % 3600) / 60);
+    var s = t % 60;
+    return (h < 10 ? '0' : '') + h + ':' +
+           (m < 10 ? '0' : '') + m + ':' +
+           (s < 10 ? '0' : '') + s;
   }
 
   function formatMmSs(totalSeconds) {
@@ -164,13 +232,27 @@
   function render() {
     if (!state) { setActiveView('loading'); return; }
 
-    // Guest free-tier session takes priority over the auth gate — when
-    // a guest session exists we show the main view (with a free-trial
-    // countdown badge) regardless of whether the user is signed in or
-    // premium. Disconnecting (manually or quota-exhausted) clears the
-    // guestSession in storage and the next render() reverts to the
-    // appropriate auth/locked/main view.
-    if (state.guestSession) {
+    // First-run gate — show the "browser traffic only / get the
+    // desktop app for whole-computer" card BEFORE any auth/main view.
+    // The card sets expectations so users don't bounce on the first
+    // connect when they realize the extension doesn't tunnel non-
+    // browser apps. Dismissed once and never shown again
+    // (storage.onboardingSeen).
+    if (state.onboardingSeen === false) {
+      setActiveView('onboarding');
+      return;
+    }
+
+    // Guest free-tier takes priority over the auth gate. Two states
+    // both land on the main view:
+    //   1. guestSession  — proxy is up, countdown ticking.
+    //   2. guestModeIntent && !auth — user has chosen "free tier" but
+    //      hasn't tapped Connect yet (onboarding direct-route or
+    //      auth-screen Try-free). Orb tap from this state opens the
+    //      tier chooser; orb tap inside the chooser is what actually
+    //      fires /api/guest/start. The intent flag persists across
+    //      popup closes; cleared on sign-in or quota-exhausted.
+    if (state.guestSession || (state.guestModeIntent && !state.isAuthenticated)) {
       setActiveView('main');
       renderMain();
       return;
@@ -178,6 +260,25 @@
 
     if (!state.isAuthenticated) {
       setActiveView('auth');
+      return;
+    }
+    // Signed in but email not verified yet → "Check your email" card
+    // with the 6-digit OTP input. Holds the user here until /api/auth/me
+    // returns emailVerified=true.
+    if (state.user && state.user.emailVerified === false) {
+      renderEmailPending();
+      setActiveView('email-pending');
+      return;
+    }
+    // Email-verified + premium → existing main view, full server list.
+    // Email-verified + NOT premium → main view in user-tier mode:
+    //   pending state ("Tap to Connect — 2 hours/day"), or connected
+    //   state with the HH:MM:SS countdown if userSession is live.
+    //   No more "Subscription required" wall — that's gated behind
+    //   the locations tab + paywall now.
+    if (state.user && state.user.emailVerified === true) {
+      setActiveView('main');
+      renderMain();
       return;
     }
     if (!state.isPremium) {
@@ -188,11 +289,44 @@
     renderMain();
   }
 
+  function renderEmailPending() {
+    if (els.emailPendingAddress) {
+      els.emailPendingAddress.textContent = (state.user && state.user.email) || 'your inbox';
+    }
+    if (els.emailPendingMsg) {
+      els.emailPendingMsg.hidden = true;
+      els.emailPendingMsg.textContent = '';
+      els.emailPendingMsg.classList.remove('ep-msg--error');
+    }
+    if (els.emailPendingCode) {
+      els.emailPendingCode.value = '';
+      // Focus the code input after a tick so the popup paint settles
+      // first (focus during a hidden→visible transition is dropped
+      // on some browsers).
+      setTimeout(function () {
+        try { els.emailPendingCode.focus(); } catch (_) {}
+      }, 50);
+    }
+  }
+
+  function setEmailPendingMessage(text, isError) {
+    if (!els.emailPendingMsg) return;
+    els.emailPendingMsg.hidden = !text;
+    els.emailPendingMsg.textContent = text || '';
+    els.emailPendingMsg.classList.toggle('ep-msg--error', !!isError);
+  }
+
   // ---- Main view rendering ----------------------------------------------
 
   function renderMain() {
     var conn = state.connection || { status: 'disconnected' };
     var servers = state.servers || [];
+    var isGuestPending = !!(state.guestModeIntent && !state.guestSession && !state.isAuthenticated);
+    var isUserTier = !!state.userSession;
+    var isUserTierPending = !!(
+      state.isAuthenticated && state.user && state.user.emailVerified === true &&
+      !state.isPremium && !state.userSession
+    );
     var selectedId = state.selectedServerId
       || (conn.status === 'connected' && conn.serverId)
       || (servers[0] && servers[0].id)
@@ -218,6 +352,20 @@
       els.statusSub.textContent  = (typeof selected.pingMs === 'number' && selected.pingMs > 0)
         ? (selected.pingMs + ' ms · ' + (selected.host || ''))
         : (selected.host || 'Tap to change');
+    } else if (isUserTierPending) {
+      // Email-verified-not-premium user pre-connect: backend picks
+      // the tier server at /api/user-session/start, so surface
+      // "auto-selected" instead of a dead-end "Choose a location" CTA.
+      els.statusFlag.textContent = '📧';
+      els.statusName.textContent = 'Email-tier server';
+      els.statusSub.textContent  = 'Auto-selected on connect';
+    } else if (isGuestPending) {
+      // Anonymous popup has no server list (no JWT). Backend assigns
+      // the free-tier server at /api/guest/start time — surface as
+      // "auto-selected".
+      els.statusFlag.textContent = '🎁';
+      els.statusName.textContent = 'Free trial server';
+      els.statusSub.textContent  = 'Auto-selected on connect';
     } else {
       els.statusFlag.textContent = '🌐';
       els.statusName.textContent = 'Choose a location';
@@ -228,7 +376,11 @@
                  : status === 'connecting' ? 'Connecting…'
                  : 'Tap to Connect';
     els.connectBtn.querySelector('.connect-label').textContent = btnLabel;
-    els.connectBtn.disabled = !selected || status === 'connecting';
+    // User-tier pending and guest-pending both let the user tap
+    // connect without a selected server (backend picks). Everyone
+    // else still needs a selection.
+    els.connectBtn.disabled = status === 'connecting' ||
+      (!isUserTierPending && !isGuestPending && !selected);
 
     if (status === 'error' && conn.error) {
       els.statusError.hidden = false;
@@ -299,9 +451,31 @@
       }
     }
 
-    // Settings tab — show user email
+    // Settings tab — show user email for signed-in users, repurpose
+    // the "Sign out" row as "Sign in / Create account" for guest-mode
+    // users so they have a clean exit back to auth.
+    var inGuestMode = isGuestPending || !!state.guestSession;
+    // isUserTier / isUserTierPending are computed above and consumed
+    // by the server-picker block + orb disabled-state. The settings
+    // row labels here only care about anonymous-vs-signed-in, so they
+    // don't branch on the user tier explicitly.
+    void isUserTier; void isUserTierPending;
     if (els.settingsUser) {
-      els.settingsUser.textContent = (state.user && state.user.email) || '';
+      if (state.user && state.user.email) {
+        els.settingsUser.textContent = state.user.email;
+      } else if (inGuestMode) {
+        els.settingsUser.textContent = 'Free trial mode';
+      } else {
+        els.settingsUser.textContent = '—';
+      }
+    }
+    if (els.settingsLogout) {
+      var logoutLabel = els.settingsLogout.querySelector('.setting-label');
+      if (logoutLabel) {
+        logoutLabel.textContent = (!state.isAuthenticated && inGuestMode)
+          ? 'Sign in / Create account'
+          : 'Sign out';
+      }
     }
   }
 
@@ -397,15 +571,18 @@
       paintUptime();
     }
     var isGuest = !!(state && state.guestSession);
+    var isUserTier = !!(state && state.userSession);
     var paint = function () {
       if (els.statUptime && conn && conn.status === 'connected' && conn.connectedAt) {
         els.statUptime.textContent = formatDuration(Date.now() - conn.connectedAt);
       }
-      if (isGuest && !els.brandSub.hidden) {
+      if (isUserTier && !els.brandSub.hidden) {
+        els.brandSub.textContent = 'Email plan · ' + formatHhMmSs(computeUserRemainingSeconds()) + ' left today';
+      } else if (isGuest && !els.brandSub.hidden) {
         els.brandSub.textContent = 'Free trial · ' + formatMmSs(computeGuestRemainingSeconds()) + ' left today';
       }
     };
-    if ((conn && conn.status === 'connected' && conn.connectedAt) || isGuest) {
+    if ((conn && conn.status === 'connected' && conn.connectedAt) || isGuest || isUserTier) {
       uptimeTimer = setInterval(paint, 1000);
     }
   }
@@ -449,6 +626,154 @@
   }
 
   // ---- Event wiring ------------------------------------------------------
+
+  // Tier chooser — shown after the guest-pending user taps the orb.
+  // Two paths:
+  //   1. "Sign up — 2 hours/day" → switches the popup to the auth
+  //      view with the signup form visible. After signup the
+  //      email-pending view takes over until verification.
+  //   2. "Free 20 min/day" → kicks off /api/guest/start (the same
+  //      anonymous flow the Try-free button on the auth view uses).
+  //   3. "Back" → returns to the main pending view.
+  if (els.chooserSignup) {
+    els.chooserSignup.addEventListener('click', function () {
+      // Exit guest mode so the auth view actually shows (render()
+      // would otherwise route us back to main pending).
+      send('guest-mode-exit').then(function () {
+        // Force the signup tab to be the visible one on auth view.
+        els.loginForm && els.loginForm.classList.add('hidden');
+        els.signupForm && els.signupForm.classList.remove('hidden');
+        return refresh();
+      });
+    });
+  }
+  if (els.chooserGuest) {
+    els.chooserGuest.addEventListener('click', function () {
+      setBusy(els.chooserGuest, true, 'Connecting…');
+      send('guest-start')
+        .catch(function (err) {
+          var msg = err.message || 'Free trial unavailable right now';
+          if (err.code === 'GUEST_QUOTA_EXHAUSTED') {
+            msg = "Today's 20 minutes are gone. Resets at midnight UTC, or sign up for 2 hours/day.";
+          } else if (err.code === 'IP_RATE_LIMIT') {
+            msg = 'Too many free trials from this network today. Try again tomorrow or sign up.';
+          } else if (err.code === 'NO_GUEST_SERVER') {
+            msg = 'Free-trial server is busy — try again in a minute.';
+          }
+          // Surface via the main view's status-error after refresh.
+          alert(msg);
+        })
+        .then(refresh)
+        .then(function () {
+          setBusy(els.chooserGuest, false, 'Continue free — 20 min/day');
+        });
+    });
+  }
+  if (els.chooserBack) {
+    els.chooserBack.addEventListener('click', function () {
+      // Just re-render — guestModeIntent is still set, so render()
+      // routes back to the main view in pending state.
+      refresh();
+    });
+  }
+
+  // Email-pending view — user types the 6-digit code from their
+  // inbox into the input. Submit hits /api/auth/verify-email-code;
+  // success refreshes /me (emailVerified flips true) and render()
+  // routes onward. Resend rotates the code and re-sends the email.
+  // Change email signs them out so they can re-signup with a
+  // different address.
+  if (els.emailPendingForm) {
+    els.emailPendingForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var raw = (els.emailPendingCode && els.emailPendingCode.value) || '';
+      var code = raw.replace(/\D/g, '');
+      if (code.length !== 6) {
+        setEmailPendingMessage('Enter the 6-digit code from your email.', true);
+        return;
+      }
+      setEmailPendingMessage('', false);
+      setBusy(els.emailPendingVerify, true, 'Verifying…');
+      send('submit-verify-code', { code: code })
+        .then(function () { return refresh(); })
+        .catch(function (err) {
+          var msg = err.message || 'Verification failed.';
+          if (err.code === 'VERIFY_CODE_WRONG' && err.payload && err.payload.attemptsLeft != null) {
+            msg = 'Wrong code. ' + err.payload.attemptsLeft + ' tries left before you need to resend.';
+          } else if (err.code === 'VERIFY_CODE_EXPIRED') {
+            msg = 'That code expired. Tap Resend to get a new one.';
+          } else if (err.code === 'VERIFY_CODE_LOCKED') {
+            msg = 'Too many wrong codes. Tap Resend to get a new one.';
+          }
+          setEmailPendingMessage(msg, true);
+        })
+        .then(function () {
+          setBusy(els.emailPendingVerify, false, 'Verify');
+        });
+    });
+  }
+  // Strip non-digits live so a paste of "123 456" still works.
+  if (els.emailPendingCode) {
+    els.emailPendingCode.addEventListener('input', function (e) {
+      var v = (e.target.value || '').replace(/\D/g, '').slice(0, 6);
+      if (v !== e.target.value) e.target.value = v;
+      // Auto-submit when the 6th digit is entered — saves a click
+      // and matches how Apple / Google's OTP UIs feel.
+      if (v.length === 6 && els.emailPendingForm) {
+        els.emailPendingForm.dispatchEvent(new Event('submit', { cancelable: true }));
+      }
+    });
+  }
+  if (els.emailPendingResend) {
+    els.emailPendingResend.addEventListener('click', function () {
+      setBusy(els.emailPendingResend, true, 'Sending…');
+      send('resend-verify-email')
+        .then(function () {
+          setEmailPendingMessage('Sent — check your inbox (and spam).', false);
+          if (els.emailPendingCode) {
+            els.emailPendingCode.value = '';
+            try { els.emailPendingCode.focus(); } catch (_) {}
+          }
+        })
+        .catch(function (err) {
+          var msg = err.message || 'Could not resend right now.';
+          if (err.code === 'RESEND_THROTTLED' && err.payload && err.payload.retryAfter) {
+            msg = 'Wait ' + err.payload.retryAfter + 's before requesting another code.';
+          }
+          setEmailPendingMessage(msg, true);
+        })
+        .then(function () {
+          setBusy(els.emailPendingResend, false, 'Resend code');
+        });
+    });
+  }
+  if (els.emailPendingChange) {
+    els.emailPendingChange.addEventListener('click', function () {
+      send('logout').then(refresh);
+    });
+  }
+
+  // Onboarding — first-run card dismissal. "Got it" routes the user
+  // directly to the main screen in guest-pending state ("Tap to
+  // Connect", no countdown yet) — no spinner, no auth wall in
+  // between. The actual /api/guest/start call happens later when the
+  // user taps the connect orb and picks "Free 20 min" from the
+  // chooser. "Get the desktop app" opens /download and dismisses
+  // onboarding without entering guest mode (they're heading
+  // elsewhere).
+  if (els.onboardingDone) {
+    els.onboardingDone.addEventListener('click', function () {
+      send('dismiss-onboarding-to-main')
+        .then(refresh)
+        .catch(function () { refresh(); });
+    });
+  }
+  if (els.onboardingGetApp) {
+    els.onboardingGetApp.addEventListener('click', function () {
+      send('open-page', { path: '/download' }).catch(function () {});
+      send('set-onboarding-seen').then(refresh).catch(function () { refresh(); });
+    });
+  }
 
   // Tab switching
   els.tabBtns.forEach(function (btn) {
@@ -510,6 +835,9 @@
       password: els.signupPassword.value,
     }).then(function () {
       els.signupPassword.value = '';
+      // Signup leaves emailVerified=false on the backend; the next
+      // refresh() will route the popup to the email-pending view via
+      // render(). User completes verification from their inbox.
       return refresh();
     }).catch(function (err) {
       els.signupError.textContent = err.message || 'Could not create account';
@@ -571,6 +899,40 @@
       send('disconnect').then(refresh).catch(function () { refresh(); });
       return;
     }
+    // Email-verified-not-premium: tapping the orb fires
+    // /api/user-session/start for the 2hr/day tier. Higher priority
+    // than the guest chooser since a verified user has already made
+    // the "sign up" choice. We intentionally don't gate on
+    // !state.userSession here — startOrResume on the backend is
+    // idempotent (rotates the sessionToken in place), so a stale
+    // userSession in storage just gets re-issued cleanly rather than
+    // falling through to /api/extension/proxy and surfacing
+    // "Active subscription required."
+    if (state.isAuthenticated && state.user && state.user.emailVerified === true &&
+        !state.isPremium) {
+      send('user-session-start').catch(function (err) {
+        var msg = err.message || 'Could not start your session';
+        if (err.code === 'USER_TIER_QUOTA_EXHAUSTED') {
+          msg = "Today's 2 hours are gone. Resets at midnight UTC, or subscribe for unlimited.";
+        } else if (err.code === 'EMAIL_NOT_VERIFIED') {
+          msg = 'Verify your email first.';
+        } else if (err.code === 'NO_TIER_SERVER' || err.code === 'NO_TIER_PROTOCOL') {
+          msg = 'Email-tier server is busy — try again in a minute.';
+        }
+        if (els.statusError) {
+          els.statusError.hidden = false;
+          els.statusError.textContent = msg;
+        }
+      }).then(refresh);
+      return;
+    }
+    // Guest-pending (intent set, no session yet) — show the tier
+    // chooser. Picking "Free 20 min" inside the chooser calls
+    // /api/guest/start.
+    if (!state.isAuthenticated && state.guestModeIntent && !state.guestSession) {
+      setActiveView('chooser');
+      return;
+    }
     var id = state.selectedServerId || (state.servers[0] && state.servers[0].id);
     if (!id) {
       setActiveTab('locations');
@@ -619,7 +981,20 @@
   }
   if (els.settingsLogout) {
     els.settingsLogout.addEventListener('click', function () {
-      send('logout').then(refresh);
+      // Context-aware: signed-in users sign out; guest-mode users
+      // exit guest mode (and tear down any live session) so they
+      // can return to the auth screen and sign in / create account.
+      if (!state) return;
+      var inGuestMode = !state.isAuthenticated && (state.guestModeIntent || state.guestSession);
+      if (inGuestMode) {
+        var teardown = state.guestSession ? send('disconnect') : Promise.resolve();
+        teardown
+          .then(function () { return send('guest-mode-exit'); })
+          .catch(function () {})
+          .then(refresh);
+      } else {
+        send('logout').then(refresh);
+      }
     });
   }
 
@@ -632,7 +1007,10 @@
   }
 
   BX.runtime.onMessage.addListener(function (msg) {
-    if (msg && msg.type === 'state-changed') refresh();
+    if (msg && msg.type === 'state-changed') {
+      if (renderLocked) return; // suppress mid-chain flicker
+      refresh();
+    }
   });
 
   refresh().catch(function (err) {
