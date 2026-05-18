@@ -7,6 +7,7 @@
       "lib/storage.js",
       "lib/api.js",
       "lib/proxy.js",
+      "lib/pow.js",
       "background.js"
     ]
   },

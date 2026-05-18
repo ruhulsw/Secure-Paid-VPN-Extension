@@ -74,11 +74,25 @@
     });
   };
 
-  Api.prototype.signup = function (name, email, password) {
+  Api.prototype.signup = function (name, email, password, challengeId, solution) {
     return this.request('/api/auth/signup', {
       method: 'POST',
-      body: { name: name, email: email, password: password },
+      body: {
+        name: name,
+        email: email,
+        password: password,
+        challengeId: challengeId,
+        solution: solution,
+      },
     });
+  };
+
+  // Fetch a fresh proof-of-work challenge. The popup pre-fetches one
+  // when the signup form mounts so the solve can run in parallel with
+  // the user filling out the form — by the time they hit Submit, the
+  // solution is usually already cached.
+  Api.prototype.signupChallenge = function () {
+    return this.request('/api/auth/signup-challenge');
   };
 
   Api.prototype.me = function () {
