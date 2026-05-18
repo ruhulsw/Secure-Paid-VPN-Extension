@@ -13,7 +13,7 @@
   // importScripts (which exists in worker scope only).
   if (typeof importScripts === 'function') {
     try {
-      importScripts('lib/browser.js', 'lib/storage.js', 'lib/api.js', 'lib/proxy.js');
+      importScripts('lib/browser.js', 'lib/storage.js', 'lib/api.js', 'lib/proxy.js', 'lib/pow.js');
     } catch (e) {
       console.error('[bg] importScripts failed', e);
     }
@@ -257,39 +257,46 @@
           var proxy = resp.proxy;
           var bypass = (resp.proxy && resp.proxy.bypassList) || [];
           return ProxyCtl.apply(proxy, bypass).then(function () {
-            console.log('[bg] guest proxy applied');
-            var guestSession = {
-              deviceId: state.deviceUuid,
-              sessionToken: resp.sessionToken,
-              server: resp.server,
-              remainingSeconds: resp.remainingSeconds,
-              quotaSeconds: resp.quotaSeconds,
-              resetAt: resp.resetAt,
-              connectedAt: Date.now(),
-              lastHeartbeatAt: Date.now(),
-            };
-            var conn = {
-              status: 'connected',
-              guest: true,
-              serverId: resp.server.id,
-              server: resp.server,
-              proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
-              connectedAt: Date.now(),
-            };
-            return Promise.all([
-              Storage.setGuestSession(guestSession),
-              Storage.setConnection(conn),
-            ]).then(function () {
-              setBadge('FREE', '#d4a04c');
-              broadcastState();
-              ensureGuestHeartbeatAlarm();
-              notify(
-                'Free trial connected',
-                'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
-                  '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
-              );
-              updatePublicIp({ force: true });
-              return conn;
+            console.log('[bg] guest proxy applied, warming up...');
+            // Same warmup gate as the email-tier path — wait for the
+            // first proxied fetch to succeed before flipping the UI
+            // to "connected", so a freshly-issued session can never
+            // surface Chrome's native proxy-auth dialog.
+            return warmupProxy().then(function () {
+              console.log('[bg] guest proxy warmup passed');
+              var guestSession = {
+                deviceId: state.deviceUuid,
+                sessionToken: resp.sessionToken,
+                server: resp.server,
+                remainingSeconds: resp.remainingSeconds,
+                quotaSeconds: resp.quotaSeconds,
+                resetAt: resp.resetAt,
+                connectedAt: Date.now(),
+                lastHeartbeatAt: Date.now(),
+              };
+              var conn = {
+                status: 'connected',
+                guest: true,
+                serverId: resp.server.id,
+                server: resp.server,
+                proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
+                connectedAt: Date.now(),
+              };
+              return Promise.all([
+                Storage.setGuestSession(guestSession),
+                Storage.setConnection(conn),
+              ]).then(function () {
+                setBadge('FREE', '#d4a04c');
+                broadcastState();
+                ensureGuestHeartbeatAlarm();
+                notify(
+                  'Free trial connected',
+                  'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
+                    '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
+                );
+                updatePublicIp({ force: true });
+                return conn;
+              });
             });
           });
         })
@@ -432,38 +439,45 @@
           var proxy = resp.proxy;
           var bypass = (resp.proxy && resp.proxy.bypassList) || [];
           return ProxyCtl.apply(proxy, bypass).then(function () {
-            console.log('[bg] user-tier proxy applied');
-            var userSession = {
-              sessionToken: resp.sessionToken,
-              server: resp.server,
-              remainingSeconds: resp.remainingSeconds,
-              quotaSeconds: resp.quotaSeconds,
-              resetAt: resp.resetAt,
-              connectedAt: Date.now(),
-              lastHeartbeatAt: Date.now(),
-            };
-            var conn = {
-              status: 'connected',
-              userTier: true,
-              serverId: resp.server.id,
-              server: resp.server,
-              proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
-              connectedAt: Date.now(),
-            };
-            return Promise.all([
-              Storage.setUserSession(userSession),
-              Storage.setConnection(conn),
-            ]).then(function () {
-              setBadge('2H', '#d4a04c');
-              broadcastState();
-              ensureUserHeartbeatAlarm();
-              notify(
-                'Connected',
-                'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
-                  '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
-              );
-              updatePublicIp({ force: true });
-              return conn;
+            console.log('[bg] user-tier proxy applied, warming up...');
+            // Warmup gates "connected" on a successful proxied fetch
+            // so the user doesn't see Chrome's native proxy-auth
+            // dialog if the SSH-push lost a race with Squid's first
+            // request. Status stays 'connecting' until warmup passes.
+            return warmupProxy().then(function () {
+              console.log('[bg] user-tier proxy warmup passed');
+              var userSession = {
+                sessionToken: resp.sessionToken,
+                server: resp.server,
+                remainingSeconds: resp.remainingSeconds,
+                quotaSeconds: resp.quotaSeconds,
+                resetAt: resp.resetAt,
+                connectedAt: Date.now(),
+                lastHeartbeatAt: Date.now(),
+              };
+              var conn = {
+                status: 'connected',
+                userTier: true,
+                serverId: resp.server.id,
+                server: resp.server,
+                proxy: { type: proxy.type, host: proxy.host, port: proxy.port },
+                connectedAt: Date.now(),
+              };
+              return Promise.all([
+                Storage.setUserSession(userSession),
+                Storage.setConnection(conn),
+              ]).then(function () {
+                setBadge('2H', '#d4a04c');
+                broadcastState();
+                ensureUserHeartbeatAlarm();
+                notify(
+                  'Connected',
+                  'Routing browser traffic through ' + (resp.server.city || resp.server.country) +
+                    '. ' + Math.floor(resp.remainingSeconds / 60) + ' min left today.'
+                );
+                updatePublicIp({ force: true });
+                return conn;
+              });
             });
           });
         })
@@ -731,6 +745,65 @@
     BX.runtime.sendMessage({ type: 'state-changed' }).catch(function () { /* no listeners is fine */ });
   }
 
+  // ---- Proxy warmup ------------------------------------------------------
+  //
+  // After ProxyCtl.apply() resolves, the proxy IS configured in the
+  // browser — but on a brand-new session there can still be a small
+  // window where the on-box Squid hasn't quite seen the cred (the
+  // backend's SSH push is best-effort + the on-box agent's polling is
+  // the fallback). In that window, the browser's first CONNECT lands
+  // with 407, Chrome retries via onAuthRequired with the right creds,
+  // Squid finally accepts — but if Chrome's retry count is exhausted
+  // first the user sees its native proxy-auth dialog. (Squid also
+  // caches the failure for `credentialsttl`, recently lowered from
+  // 5 min → 30 sec on every box.)
+  //
+  // The warmup gates the popup's "connected" state on a successful
+  // proxied fetch to api.ipify.org. On the happy path (SSH push
+  // landed before this fired) it succeeds first try and adds zero
+  // visible delay. On the slow path it retries every 4 sec for up to
+  // 30 sec — the user sees the orb in its "connecting" state for the
+  // duration, then it transitions to "connected" once the proxy is
+  // verified usable.
+  function warmupProxy() {
+    var DEADLINE_MS = 30000;
+    var BACKOFF_MS = 4000;
+    var startedAt = Date.now();
+
+    function attempt() {
+      var controller = typeof AbortController === 'function' ? new AbortController() : null;
+      var timeoutId = setTimeout(function () {
+        if (controller) controller.abort();
+      }, 6000);
+      var fetchOpts = { credentials: 'omit', cache: 'no-store' };
+      if (controller) fetchOpts.signal = controller.signal;
+
+      return fetch('https://api.ipify.org?format=json', fetchOpts)
+        .then(function (res) {
+          clearTimeout(timeoutId);
+          // 407 means Squid still doesn't have our cred. Anything
+          // else (200 / 5xx / etc.) means the CONNECT handshake
+          // through the proxy did succeed — the request reached
+          // the origin, which is all we need from a warmup.
+          if (res.status === 407) {
+            throw new Error('407');
+          }
+          return true;
+        })
+        .catch(function (err) {
+          clearTimeout(timeoutId);
+          if (Date.now() - startedAt > DEADLINE_MS) {
+            throw err;
+          }
+          return new Promise(function (resolve) {
+            setTimeout(function () { resolve(attempt()); }, BACKOFF_MS);
+          });
+        });
+    }
+
+    return attempt();
+  }
+
   // ---- Uninstall-feedback URL -------------------------------------------
   // chrome.runtime.setUninstallURL fires the URL exactly once after the
   // user removes the extension, with no payload control beyond the
@@ -939,8 +1012,19 @@
     },
 
     'signup': function (msg) {
+      // Two-step: fetch a fresh PoW challenge, solve it locally
+      // (Pow.solve via crypto.subtle in the SW context — ~1-2 sec at
+      // 20-bit difficulty), then call /signup with the solution. The
+      // solve happens here in the background so the popup's UI thread
+      // stays responsive; on a typical signup the user is still
+      // skimming the email-pending screen by the time the network
+      // round-trip completes.
       return configureApi().then(function () {
-        return api.signup(msg.name, msg.email, msg.password);
+        return api.signupChallenge();
+      }).then(function (challenge) {
+        return Pow.solve(challenge.nonce, challenge.difficulty).then(function (solution) {
+          return api.signup(msg.name, msg.email, msg.password, challenge.challengeId, solution);
+        });
       }).then(function (resp) {
         return Promise.all([
           Storage.setAuthToken(resp.token),
