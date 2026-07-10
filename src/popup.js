@@ -264,20 +264,10 @@
       return;
     }
 
-    // Guest free-tier takes priority over the auth gate. Two states
-    // both land on the main view:
-    //   1. guestSession  — proxy is up, countdown ticking.
-    //   2. guestModeIntent && !auth — user has chosen "free tier" but
-    //      hasn't tapped Connect yet (onboarding direct-route or
-    //      auth-screen Try-free). Orb tap from this state opens the
-    //      tier chooser; orb tap inside the chooser is what actually
-    //      fires /api/guest/start. The intent flag persists across
-    //      popup closes; cleared on sign-in or quota-exhausted.
-    if (state.guestSession || (state.guestModeIntent && !state.isAuthenticated)) {
-      setActiveView('main');
-      renderMain();
-      return;
-    }
+    // (Anonymous guest tier removed — the free tier now requires signup +
+    // verify. No guest-priority routing: an unauthenticated user always
+    // lands on the auth view below; any stale guest state is wiped on
+    // background bootstrap.)
 
     if (!state.isAuthenticated) {
       // Keep the (logged-out) password-reset flow on screen if the user
@@ -778,17 +768,14 @@
     });
   }
 
-  // Onboarding — first-run card dismissal. "Got it" routes the user
-  // directly to the main screen in guest-pending state ("Tap to
-  // Connect", no countdown yet) — no spinner, no auth wall in
-  // between. The actual /api/guest/start call happens later when the
-  // user taps the connect orb and picks "Free 20 min" from the
-  // chooser. "Get the desktop app" opens /download and dismisses
-  // onboarding without entering guest mode (they're heading
-  // elsewhere).
+  // Onboarding — first-run card dismissal. The free tier now requires
+  // signup + email verification (10 min/day), so "Got it" just marks the
+  // card seen and lands on the sign-in / sign-up view (render() routes an
+  // unauthenticated user with no session there). "Get the desktop app"
+  // opens /download and also just dismisses the card.
   if (els.onboardingDone) {
     els.onboardingDone.addEventListener('click', function () {
-      send('dismiss-onboarding-to-main')
+      send('set-onboarding-seen')
         .then(refresh)
         .catch(function () { refresh(); });
     });

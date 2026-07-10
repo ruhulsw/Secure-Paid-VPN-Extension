@@ -935,14 +935,13 @@
     },
 
     // Combined onboarding dismissal + enter guest-mode intent. Atomic
-    // from the popup's perspective so render() doesn't flash through
-    // an intermediate auth view between onboardingSeen flipping true
-    // and guestModeIntent landing.
+    // Legacy onboarding-dismissal handler. The anonymous guest tier has
+    // been removed, so this NEVER enables guest mode anymore — it only
+    // records that onboarding was seen (the popup now sends
+    // 'set-onboarding-seen' directly; this alias stays inert for any
+    // stale/cached popup that might still send the old message).
     'dismiss-onboarding-to-main': function () {
-      return Promise.all([
-        Storage.setOnboardingSeen(),
-        Storage.setGuestModeIntent(true),
-      ]).then(function () {
+      return Storage.setOnboardingSeen().then(function () {
         broadcastState();
         return { ok: true };
       });
@@ -984,17 +983,12 @@
       });
     },
 
-    // User tapped "Try free" on the auth screen — flips them to the
-    // main view but does NOT start the proxy. The session (and its
-    // 20-min countdown) only kicks in when they tap Connect; see the
-    // popup's connect-button handler for the second step. Without this
-    // split, the trial timer was already burning before the user had
-    // even seen the connect orb.
+    // Anonymous guest tier removed — this is now inert. It never sets
+    // guest intent; kept only so a stale popup sending the old message
+    // gets a clean no-op instead of an "unknown action" error. The free
+    // tier requires signup + email verification (see 'user-session-start').
     'guest-mode-enter': function () {
-      return Storage.setGuestModeIntent(true).then(function () {
-        broadcastState();
-        return { ok: true };
-      });
+      return Promise.resolve({ ok: false, removed: true });
     },
     'guest-mode-exit': function () {
       return Storage.setGuestModeIntent(false).then(function () {
@@ -1097,8 +1091,11 @@
       });
     },
 
+    // Anonymous guest connect removed. Inert no-op (never calls
+    // guestConnect) so a stale popup can't spin up an anonymous session.
+    // Free access is signup + verify → 'user-session-start'.
     'guest-start': function () {
-      return guestConnect();
+      return Promise.resolve({ ok: false, removed: true });
     },
 
     // Email-verified user-tier (2 hours/day) start. JWT-authed; the
