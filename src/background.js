@@ -769,8 +769,11 @@
     var DEADLINE_MS = 30000;
     var BACKOFF_MS = 4000;
     var startedAt = Date.now();
+    var attemptNo = 0;
 
     function attempt() {
+      attemptNo += 1;
+      var thisAttempt = attemptNo;
       var controller = typeof AbortController === 'function' ? new AbortController() : null;
       var timeoutId = setTimeout(function () {
         if (controller) controller.abort();
@@ -778,9 +781,11 @@
       var fetchOpts = { credentials: 'omit', cache: 'no-store' };
       if (controller) fetchOpts.signal = controller.signal;
 
+      console.log('[warmup] attempt ' + thisAttempt + ' → CONNECT via proxy to api.ipify.org');
       return fetch('https://api.ipify.org?format=json', fetchOpts)
         .then(function (res) {
           clearTimeout(timeoutId);
+          console.log('[warmup] attempt ' + thisAttempt + ' got HTTP ' + res.status);
           // 407 means Squid still doesn't have our cred. Anything
           // else (200 / 5xx / etc.) means the CONNECT handshake
           // through the proxy did succeed — the request reached
@@ -792,6 +797,9 @@
         })
         .catch(function (err) {
           clearTimeout(timeoutId);
+          console.warn('[warmup] attempt ' + thisAttempt + ' failed: ' +
+            (err && err.name) + ' / ' + (err && err.message) +
+            ' (elapsed ' + (Date.now() - startedAt) + 'ms)');
           if (Date.now() - startedAt > DEADLINE_MS) {
             throw err;
           }

@@ -86,11 +86,8 @@
       },
     };
 
-    // console.debug — keeps the proxy host:port out of default
-    // devtools output (level "verbose"), so users pasting support-
-    // ticket logs don't leak their exit node. Show with the Verbose
-    // filter enabled when debugging.
-    console.debug('[proxy] setting', scheme + '://' + proxy.host + ':' + proxy.port,
+    console.log('[proxy] setting', scheme + '://' + proxy.host + ':' + proxy.port,
+                'user=' + (proxy.username || '(none)'),
                 'bypass=', mergedBypass.join(','));
 
     return new Promise(function (resolve, reject) {
