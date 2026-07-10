@@ -57,6 +57,13 @@
       Storage.getAuthToken(),
     ]).then(function (results) {
       api.configure(results[0].apiBase, results[1]);
+      // Keep the control plane off the data plane even when apiBase is
+      // not the stock host: the proxy layer bypasses this hostname on
+      // both browsers (Chromium bypassList + Firefox onRequest matcher).
+      try {
+        var apiHost = new URL(results[0].apiBase).hostname;
+        if (ProxyCtl.setControlPlaneHost) ProxyCtl.setControlPlaneHost(apiHost);
+      } catch (_) { /* unparseable apiBase — defaults still bypassed */ }
       return { settings: results[0], token: results[1] };
     });
   }
@@ -1232,9 +1239,10 @@
 
   // Returns true if the browser is currently routing through our proxy.
   // Chromium: chrome.proxy.settings persist across SW restarts, so we ask
-  // the API directly. Firefox: the per-request proxy.onRequest listener is
-  // in-memory and dies with the SW, so a fresh SW lifetime always means
-  // direct browsing — return false.
+  // the API directly. Firefox: proxy liveness is decided by
+  // rehydrateFirefoxProxy (permanent top-level onRequest listener +
+  // persisted state), not here — return false so the Chromium-only
+  // proxy.settings probe below is skipped.
   function isProxyStillActive() {
     if (BX.isFirefox) return Promise.resolve(false);
     if (!BX.proxy || !BX.proxy.settings || !BX.proxy.settings.get) {
@@ -1286,6 +1294,26 @@
       // without their consent.
       Storage.getConnection()
         .then(function (conn) {
+          // A previous version's anonymous-guest connection may still be
+          // live (proxy applied, creds dying server-side, no heartbeat —
+          // the guest tier is gone). Tear it down fully instead of
+          // rehydrating a zombie session that half-works until the exit
+          // node drops the cred.
+          if (conn && conn.guest && (conn.status === 'connected' || conn.status === 'connecting')) {
+            return ProxyCtl.clear().catch(function () {})
+              .then(function () {
+                return Storage.setConnection({
+                  status: 'disconnected',
+                  reason: 'guest-tier-removed',
+                  at: Date.now(),
+                });
+              })
+              .then(function () {
+                setBadge('', '#000000');
+                broadcastState();
+                return { conn: null, rehydratedFirefox: false, rehydratedChromium: false };
+              });
+          }
           // Two parallel rehydrate paths — only one applies per browser:
           //  - Firefox: re-register proxy.onRequest from persisted creds.
           //    Without this, every Firefox SW restart silently drops the
@@ -1338,13 +1366,12 @@
         refreshMe().catch(function () { /* token may be expired; UI handles */ });
       }
 
-      // Re-arm the guest-heartbeat alarm if a guest session is currently
+      // Re-arm the user-tier heartbeat alarm if a session is currently
       // active. Alarms persist across SW restarts on Chromium but are
       // wiped on Firefox SW restart — re-creating is idempotent (alarm
       // with the same name is replaced) so this is safe everywhere.
-      Storage.getGuestSession().then(function (session) {
-        if (session && session.sessionToken) ensureGuestHeartbeatAlarm();
-      });
+      // (No guest re-arm: the guest tier is removed, and bootstrap wipes
+      // any persisted guest session above — re-arming would race that.)
       Storage.getUserSession().then(function (session) {
         if (session && session.sessionToken) ensureUserHeartbeatAlarm();
       });

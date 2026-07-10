@@ -1,6 +1,6 @@
 {
   "name": "Free VPN Proxy & Unblock – SecurePaid VPN",
-  "description": "Free VPN proxy with fast US, EU, Asia servers. Unblock sites, hide your IP. 20 min/day free, no signup. Premium for unlimited.",
+  "description": "Free VPN proxy with fast US, EU, Asia servers. Unblock sites, hide your IP. 10 min/day free with a free account. Premium for unlimited.",
   "background": {
     "scripts": [
       "lib/browser.js",
@@ -17,7 +17,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "{f4e47b88-8cc2-44da-b01f-4b99ed1ec0f1}",
-      "strict_min_version": "128.0",
+      "strict_min_version": "140.0",
       "data_collection_permissions": {
         "required": [
           "authenticationInfo",

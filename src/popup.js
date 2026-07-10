@@ -592,7 +592,9 @@
         els.statUptime.textContent = formatDuration(Date.now() - conn.connectedAt);
       }
       if (isUserTier && !els.brandSub.hidden) {
-        els.brandSub.textContent = 'Email plan · ' + formatHhMmSs(computeUserRemainingSeconds()) + ' left today';
+        // Match the render()-time label ("Free · MM:SS left today") — this
+        // ticker used to flip it to "Email plan · HH:MM:SS" a second later.
+        els.brandSub.textContent = 'Free · ' + formatMmSs(computeUserRemainingSeconds()) + ' left today';
       } else if (isGuest && !els.brandSub.hidden) {
         els.brandSub.textContent = 'Free trial · ' + formatMmSs(computeGuestRemainingSeconds()) + ' left today';
       }

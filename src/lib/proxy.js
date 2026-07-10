@@ -17,6 +17,20 @@
     '*.securepaidvpn.com',
   ];
 
+  // Control-plane hosts beyond the default. ALWAYS_BYPASS covers the
+  // stock apiBase; if the user points apiBase somewhere else (Settings),
+  // background.js pushes that hostname here so the extension's own API
+  // traffic never rides the data plane on any browser.
+  var controlPlaneHosts = [];
+  function setControlPlaneHost(host) {
+    var h = String(host || '').toLowerCase();
+    if (!h) return;
+    if (controlPlaneHosts.indexOf(h) === -1) {
+      controlPlaneHosts.push(h);
+      controlPlaneHosts.push('*.' + h);
+    }
+  }
+
   // Recognized proxy schemes. Anything outside this set used to silently
   // downgrade to plain `http://`, which would tunnel the user's browser
   // traffic over an unencrypted proxy. Hard-fail instead.
@@ -29,7 +43,7 @@
     // localhost through the proxy and break dev tools / internal hosts.
     var seen = Object.create(null);
     var merged = [];
-    [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS).forEach(function (h) {
+    [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS, controlPlaneHosts).forEach(function (h) {
       var k = String(h).toLowerCase();
       if (!seen[k]) { seen[k] = 1; merged.push(h); }
     });
@@ -228,19 +242,39 @@
   // with username/password auth baked in (no separate onAuthRequired
   // round-trip), needs no private-browsing permission, and matches the
   // way every Firefox VPN extension actually ships.
-  var firefoxListener = null;
+  // Firefox proxy state. The permanent top-level proxy.onRequest listener
+  // (registered at module load, further down) consults these:
+  //   firefoxProxyInfo   — ProxyInfo to return; null = direct browsing.
+  //   firefoxBypassCheck — matcher for the active bypass list.
+  //   firefoxStateKnown  — false until this event-page lifetime has either
+  //                        applied/cleared a proxy or hydrated the persisted
+  //                        state from storage. While false, the listener
+  //                        returns a Promise (Firefox holds the request →
+  //                        fail-closed) instead of guessing.
   var firefoxProxyInfo = null;
+  var firefoxBypassCheck = null;
+  var firefoxStateKnown = false;
+  // Non-secret persisted descriptor {type, host, port, proxyDNS, bypassList}
+  // — credentials stay in the PROXY_CREDS key that ProxyCtl.apply writes.
+  var FF_STATE_KEY = '__ffProxyState';
 
   function buildBypassMatcher(bypassList) {
     // Mirror mergeBypassList: always include BYPASS_DEFAULT + ALWAYS_BYPASS
-    // regardless of what the backend sends, so localhost / 127.0.0.1 /
-    // securepaidvpn.com always bypass even if bypassList is missing.
-    var raw = [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS);
+    // + controlPlaneHosts regardless of what the backend sends, so
+    // localhost / 127.0.0.1 / securepaidvpn.com always bypass even if
+    // bypassList is missing.
+    var raw = [].concat(BYPASS_DEFAULT, bypassList || [], ALWAYS_BYPASS, controlPlaneHosts);
     var exact = Object.create(null);
     var suffixes = [];
+    var matchLocal = false;
     raw.forEach(function (h) {
       var s = String(h).toLowerCase();
-      if (s === '<local>') return; // not meaningful for hostnames in onRequest
+      if (s === '<local>') {
+        // Chromium's '<local>' = single-label hostnames (no dot). Mirror
+        // that here so intranet hosts behave the same on both browsers.
+        matchLocal = true;
+        return;
+      }
       if (s.indexOf('*.') === 0) {
         suffixes.push(s.slice(1)); // ".securepaidvpn.com"
       } else {
@@ -251,6 +285,7 @@
     return function (host) {
       var h = String(host || '').toLowerCase();
       if (exact[h]) return true;
+      if (matchLocal && h.indexOf('.') === -1) return true;
       for (var i = 0; i < suffixes.length; i++) {
         if (h.endsWith(suffixes[i])) return true;
       }
@@ -324,38 +359,40 @@
       }
     }
 
-    var isBypassed = buildBypassMatcher(bypassList);
-
-    if (firefoxListener) {
-      BX.raw.proxy.onRequest.removeListener(firefoxListener);
-      firefoxListener = null;
-    }
-    firefoxListener = function (requestInfo) {
-      try {
-        var url = new URL(requestInfo.url);
-        if (isBypassed(url.hostname)) return { type: 'direct' };
-      } catch (_) { /* ignore parse errors, default to proxying */ }
-      return firefoxProxyInfo;
-    };
+    firefoxBypassCheck = buildBypassMatcher(bypassList);
+    firefoxStateKnown = true;
 
     // console.debug instead of .log so the proxy host:port doesn't
     // appear by default when users paste their devtools output into
     // support tickets. Verbose-level filters in chrome://inspect /
     // about:debugging surface it when we need it.
-    console.debug('[proxy] firefox: registering proxy.onRequest →',
+    console.debug('[proxy] firefox: proxy state set →',
       pacType + '://' + proxy.host + ':' + proxy.port);
-    BX.raw.proxy.onRequest.addListener(firefoxListener, { urls: ['<all_urls>'] });
 
-    // Errors fire on the onError event — log them so they show in the
-    // background console (most often: "wrong username/password").
-    if (BX.raw.proxy.onError && !setProxyFirefox._onErrorInstalled) {
-      setProxyFirefox._onErrorInstalled = true;
-      BX.raw.proxy.onError.addListener(function (err) {
-        console.error('[proxy] firefox proxy error:', err && err.message);
-      });
-    }
-
-    return Promise.resolve();
+    // NO addListener here — the permanent top-level proxy.onRequest
+    // listener (registered at module load below) reads the state we just
+    // set. Registering per-connect was the fail-open bug: the listener
+    // died with the event page (~30s idle) and Firefox stopped waking us,
+    // so every request silently went DIRECT while the UI said connected.
+    //
+    // Persist the non-secret descriptor (creds are already in PROXY_CREDS
+    // — ProxyCtl.apply writes them before calling us) so the top-level
+    // listener can rebuild this exact state — including the backend-
+    // supplied bypass list, which the old rehydrate path used to drop —
+    // on the next event-page wake.
+    var payload = {};
+    payload[FF_STATE_KEY] = {
+      type: pacType,
+      host: proxy.host,
+      port: Number(proxy.port),
+      proxyDNS: pacType === 'socks',
+      bypassList: [].concat(bypassList || []),
+    };
+    return BX.storage.set(payload).catch(function (e) {
+      // Non-fatal: the live connection works from in-memory state; only
+      // wake-after-suspend rehydration is degraded.
+      console.warn('[proxy] firefox: could not persist proxy state', e && e.message);
+    });
   }
 
   function clearProxyFirefox() {
@@ -375,13 +412,19 @@
       return clearProxyChromium();
     }
 
-    if (firefoxListener) {
-      try { BX.raw.proxy.onRequest.removeListener(firefoxListener); } catch (_) {}
-      firefoxListener = null;
-    }
+    // The permanent top-level listener stays registered; flipping the
+    // state to known-direct makes it answer {type:'direct'} for every
+    // request. Also wipe the persisted descriptor so a later event-page
+    // wake hydrates to direct instead of resurrecting the dead proxy.
     firefoxProxyInfo = null;
-    console.log('[proxy] firefox: proxy.onRequest listener removed');
-    return Promise.resolve();
+    firefoxBypassCheck = null;
+    firefoxStateKnown = true;
+    console.log('[proxy] firefox: proxy state cleared (direct)');
+    return BX.storage.remove(FF_STATE_KEY).catch(function () {
+      var payload = {};
+      payload[FF_STATE_KEY] = null;
+      return BX.storage.set(payload).catch(function () {});
+    });
   }
 
   // Stash creds for the active proxy so onAuthRequired can answer the
@@ -430,6 +473,101 @@
   // SW is starting, so by the time the listener runs the load is usually
   // already complete.
   loadActiveCredentialsFromStorage().catch(function () {});
+
+  // Rebuild the in-memory Firefox proxy state from storage. Single-flight:
+  // concurrent proxy.onRequest callbacks during a fresh event-page wake all
+  // await the same load. Rebuilds the Proxy-Authorization header from the
+  // PROXY_CREDS key (written by ProxyCtl.apply), so nothing secret lives in
+  // FF_STATE_KEY itself.
+  var firefoxHydratePromise = null;
+  function hydrateFirefoxStateFromStorage() {
+    if (firefoxStateKnown) return Promise.resolve();
+    if (firefoxHydratePromise) return firefoxHydratePromise;
+    firefoxHydratePromise = Promise.all([
+      BX.storage.get(FF_STATE_KEY),
+      loadActiveCredentialsFromStorage(),
+    ]).then(function (r) {
+      var st = r[0] && r[0][FF_STATE_KEY];
+      var creds = r[1];
+      if (st && st.host && st.port) {
+        var info = {
+          type: st.type,
+          host: st.host,
+          port: Number(st.port),
+          proxyDNS: !!st.proxyDNS,
+        };
+        if (creds && creds.username) {
+          if (st.type === 'socks' || st.type === 'socks4') {
+            info.username = creds.username;
+            info.password = creds.password || '';
+          } else {
+            try {
+              info.proxyAuthorizationHeader = 'Basic ' +
+                btoa(unescape(encodeURIComponent(creds.username + ':' + (creds.password || ''))));
+            } catch (_) { /* fall back to onAuthRequired 407 handling */ }
+          }
+        }
+        firefoxProxyInfo = info;
+        firefoxBypassCheck = buildBypassMatcher(st.bypassList || []);
+        console.log('[proxy] firefox: hydrated proxy state from storage →',
+          st.type + '://(exit node):' + st.port);
+      } else {
+        firefoxProxyInfo = null;
+        firefoxBypassCheck = null;
+      }
+      firefoxStateKnown = true;
+    }).catch(function (e) {
+      // Storage read failed — leave stateKnown=false so the next request
+      // retries the load instead of locking in a wrong answer.
+      console.error('[proxy] firefox: hydrate failed:', e && e.message);
+      firefoxHydratePromise = null;
+    });
+    return firefoxHydratePromise;
+  }
+
+  // ─── proxy.onRequest listener — registered at module load (Firefox) ──────
+  //
+  // Same rationale as the onAuthRequired hoist below: Firefox MV3 event
+  // pages only wake for events whose listeners were registered during the
+  // synchronous top-level run of the script. The old design added the
+  // listener inside setProxyFirefox(), so after the event page idled out
+  // (~30s) the listener was gone, Firefox stopped waking us, and every
+  // request silently went DIRECT while the popup still said connected —
+  // a fail-open real-IP leak. One permanent listener, registered here:
+  //   - state known    → answer synchronously from memory.
+  //   - fresh wake     → return a Promise that hydrates from storage first;
+  //                      Firefox holds the request until it resolves, so
+  //                      nothing escapes direct while we re-learn state.
+  function firefoxOnRequestFn(requestInfo) {
+    function decide() {
+      if (!firefoxProxyInfo) return { type: 'direct' };
+      try {
+        var url = new URL(requestInfo.url);
+        if (firefoxBypassCheck && firefoxBypassCheck(url.hostname)) return { type: 'direct' };
+      } catch (_) { /* unparseable URL — default to proxying */ }
+      return firefoxProxyInfo;
+    }
+    if (firefoxStateKnown) return decide();
+    return hydrateFirefoxStateFromStorage().then(decide);
+  }
+  if (BX.isFirefox && BX.raw && BX.raw.proxy && BX.raw.proxy.onRequest &&
+      typeof BX.raw.proxy.onRequest.addListener === 'function') {
+    try {
+      BX.raw.proxy.onRequest.addListener(firefoxOnRequestFn, { urls: ['<all_urls>'] });
+      console.log('[proxy] proxy.onRequest listener registered at module load');
+      // Kick hydration now so buffered/imminent requests resolve fast.
+      hydrateFirefoxStateFromStorage();
+      // Errors fire on onError — log them so they show in the background
+      // console (most often: "wrong username/password").
+      if (BX.raw.proxy.onError) {
+        BX.raw.proxy.onError.addListener(function (err) {
+          console.error('[proxy] firefox proxy error:', err && err.message);
+        });
+      }
+    } catch (e) {
+      console.error('[proxy] failed to register proxy.onRequest at module load:', e);
+    }
+  }
 
   // ─── onAuthRequired listener — registered at module load ─────────────────
   //
@@ -550,32 +688,40 @@
   function installAuthListener() { /* always registered at module load */ }
   function uninstallAuthListener() { /* never uninstalled */ }
 
-  // Firefox-only: re-register proxy.onRequest after a background script
-  // restart. Firefox MV3 background gets terminated like Chrome's SW; the
-  // in-memory listener dies with it and the browser silently switches to
-  // direct browsing. Returning false means "could not rehydrate, treat as
-  // disconnected"; true means the listener is back and the proxy is live.
+  // Firefox-only: restore the proxy state after a background restart. The
+  // permanent top-level proxy.onRequest listener survives (it re-registers
+  // on every event-page start), so "rehydrate" now just means loading the
+  // persisted state — including the backend-supplied bypass list — back
+  // into memory. Returning false means "no live proxy, treat as
+  // disconnected"; true means the state is back and the proxy is live.
   function rehydrateFirefoxProxy(connection) {
     if (!BX.isFirefox) return Promise.resolve(false);
-    if (!connection || connection.status !== 'connected' || !connection.proxy) {
+    if (!BX.raw || !BX.raw.proxy || !BX.raw.proxy.onRequest) {
       return Promise.resolve(false);
     }
-    return loadActiveCredentialsFromStorage().then(function (creds) {
-      if (!creds || !creds.username) return false;
-      var fullProxy = {
-        type: connection.proxy.type,
-        host: connection.proxy.host,
-        port: connection.proxy.port,
-        username: creds.username,
-        password: creds.password,
-      };
-      // bypassList isn't persisted per-server; mergeBypassList /
-      // buildBypassMatcher always include the safe defaults anyway.
-      return setProxyFirefox(fullProxy, []).then(function () { return true; })
-        .catch(function (e) {
-          console.warn('[proxy] firefox rehydrate failed:', e && e.message);
-          return false;
-        });
+    return hydrateFirefoxStateFromStorage().then(function () {
+      if (firefoxProxyInfo) return true;
+      // Migration: a pre-update version persisted the connection record
+      // but never wrote FF_STATE_KEY. Rebuild once from the connection +
+      // stored creds (setProxyFirefox persists the new state, so every
+      // later wake takes the fast path above).
+      if (!connection || connection.status !== 'connected' || !connection.proxy) {
+        return false;
+      }
+      return loadActiveCredentialsFromStorage().then(function (creds) {
+        if (!creds || !creds.username) return false;
+        return setProxyFirefox({
+          type: connection.proxy.type,
+          host: connection.proxy.host,
+          port: connection.proxy.port,
+          username: creds.username,
+          password: creds.password,
+        }, connection.bypassList || []).then(function () { return true; })
+          .catch(function (e) {
+            console.warn('[proxy] firefox rehydrate failed:', e && e.message);
+            return false;
+          });
+      });
     });
   }
 
@@ -631,6 +777,7 @@
     rehydrateChromiumAuth: rehydrateChromiumAuth,
     installAuthListener: installAuthListener,
     getActiveCredentials: getActiveCredentials,
+    setControlPlaneHost: setControlPlaneHost,
   };
 
   root.ProxyCtl = ProxyCtl;
