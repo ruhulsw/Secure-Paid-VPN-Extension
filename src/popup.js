@@ -37,6 +37,22 @@
     brandSub:    $('brand-sub'),
     statusPill:  $('status-pill'),
 
+    // Password reset (in-popup, code-based)
+    viewReset:         $('view-reset'),
+    resetRequestForm:  $('reset-request-form'),
+    resetEmail:        $('reset-email'),
+    resetRequestMsg:   $('reset-request-msg'),
+    resetRequestSubmit:$('reset-request-submit'),
+    resetEnterForm:    $('reset-enter-form'),
+    resetAddress:      $('reset-address'),
+    resetCode:         $('reset-code'),
+    resetPassword:     $('reset-password'),
+    resetConfirm:      $('reset-confirm'),
+    resetEnterMsg:     $('reset-enter-msg'),
+    resetEnterSubmit:  $('reset-enter-submit'),
+    resetResend:       $('reset-resend'),
+    resetBack:         $('reset-back'),
+
     // Auth
     loginForm:     $('login-form'),
     loginEmail:    $('login-email'),
@@ -101,6 +117,9 @@
   var activeTab = 'home';
   var searchQuery = '';
   var uptimeTimer = null;
+  // True while the logged-out password-reset flow is on screen, so
+  // render() keeps showing it instead of the sign-in form on broadcasts.
+  var resetMode = false;
   // While true, the popup ignores `state-changed` broadcasts so the
   // user doesn't see intermediate views flicker by during a multi-step
   // flow (onboarding-dismiss → guest-start fires several broadcasts:
@@ -119,6 +138,7 @@
       var err = new Error((resp && resp.error) || 'Unknown error');
       err.code = resp && resp.code;
       err.status = resp && resp.status;
+      err.payload = resp && resp.payload;
       throw err;
     });
   }
@@ -134,7 +154,7 @@
 
   function setActiveView(name) {
     [els.viewAuth, els.viewLocked, els.viewMain, els.viewLoading, els.viewOnboarding,
-     els.viewChooser, els.viewEmailPending].forEach(function (v) {
+     els.viewChooser, els.viewEmailPending, els.viewReset].forEach(function (v) {
       if (v) v.classList.add('hidden');
     });
     var v = name === 'auth' ? els.viewAuth
@@ -143,6 +163,7 @@
           : name === 'onboarding' ? els.viewOnboarding
           : name === 'chooser' ? els.viewChooser
           : name === 'email-pending' ? els.viewEmailPending
+          : name === 'reset' ? els.viewReset
           : els.viewLoading;
     if (v) v.classList.remove('hidden');
 
@@ -259,6 +280,10 @@
     }
 
     if (!state.isAuthenticated) {
+      // Keep the (logged-out) password-reset flow on screen if the user
+      // opened it — a background state broadcast must not yank them back
+      // to the sign-in form mid-reset.
+      if (resetMode) { setActiveView('reset'); return; }
       setActiveView('auth');
       return;
     }
@@ -846,10 +871,131 @@
     });
   });
 
-  els.forgotLink.addEventListener('click', function (e) {
-    e.preventDefault();
-    send('open-page', { path: '/forgot' }).catch(function () {});
-  });
+  // Password reset — handled IN the popup (code-based), no longer opens the
+  // website. forgot-link → reset request step (email prefilled from login).
+  function setResetMsg(el, text, isError) {
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('ep-msg--error', !!isError);
+  }
+
+  function showResetView() {
+    resetMode = true;
+    setResetMsg(els.resetRequestMsg, '', false);
+    setResetMsg(els.resetEnterMsg, '', false);
+    if (els.resetEnterForm) els.resetEnterForm.classList.add('hidden');
+    if (els.resetRequestForm) els.resetRequestForm.classList.remove('hidden');
+    if (els.resetResend) els.resetResend.classList.add('hidden');
+    if (els.resetCode) els.resetCode.value = '';
+    if (els.resetPassword) els.resetPassword.value = '';
+    if (els.resetConfirm) els.resetConfirm.value = '';
+    // Prefill the email the user already typed on the sign-in form.
+    if (els.resetEmail) {
+      els.resetEmail.value = (els.loginEmail && els.loginEmail.value.trim()) || '';
+    }
+    setActiveView('reset');
+    try { els.resetEmail.focus(); } catch (_) {}
+  }
+
+  function exitResetView() {
+    resetMode = false;
+    setActiveView('auth');
+  }
+
+  if (els.forgotLink) {
+    els.forgotLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      showResetView();
+    });
+  }
+
+  // Step 1 — request a code.
+  if (els.resetRequestForm) {
+    els.resetRequestForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var email = (els.resetEmail && els.resetEmail.value.trim().toLowerCase()) || '';
+      if (!email) { setResetMsg(els.resetRequestMsg, 'Enter your email address.', true); return; }
+      setResetMsg(els.resetRequestMsg, '', false);
+      setBusy(els.resetRequestSubmit, true, 'Sending…');
+      send('forgot-password', { email: email })
+        .then(function () {
+          // Advance to the code + new-password step (privacy: always).
+          if (els.resetAddress) els.resetAddress.textContent = email;
+          if (els.resetRequestForm) els.resetRequestForm.classList.add('hidden');
+          if (els.resetEnterForm) els.resetEnterForm.classList.remove('hidden');
+          if (els.resetResend) els.resetResend.classList.remove('hidden');
+          try { els.resetCode.focus(); } catch (_) {}
+        })
+        .catch(function (err) {
+          setResetMsg(els.resetRequestMsg, err.message || 'Could not send the code. Try again.', true);
+        })
+        .then(function () { setBusy(els.resetRequestSubmit, false, 'Send code'); });
+    });
+  }
+
+  // Step 2 — verify the code + set the new password.
+  if (els.resetEnterForm) {
+    els.resetEnterForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var email = (els.resetEmail && els.resetEmail.value.trim().toLowerCase()) || '';
+      var code = ((els.resetCode && els.resetCode.value) || '').replace(/\D/g, '');
+      var password = (els.resetPassword && els.resetPassword.value) || '';
+      var confirm = (els.resetConfirm && els.resetConfirm.value) || '';
+      if (code.length !== 6) { setResetMsg(els.resetEnterMsg, 'Enter the 6-digit code from your email.', true); return; }
+      if (password.length < 8) { setResetMsg(els.resetEnterMsg, 'Password must be at least 8 characters.', true); return; }
+      if (password !== confirm) { setResetMsg(els.resetEnterMsg, 'Passwords do not match.', true); return; }
+      setResetMsg(els.resetEnterMsg, '', false);
+      setBusy(els.resetEnterSubmit, true, 'Updating…');
+      send('reset-password', { email: email, code: code, password: password })
+        .then(function () {
+          // Done — back to the sign-in form with the email prefilled.
+          resetMode = false;
+          if (els.loginEmail) els.loginEmail.value = email;
+          if (els.loginPassword) els.loginPassword.value = '';
+          if (els.loginError) els.loginError.textContent = '';
+          if (els.signupForm) els.signupForm.classList.add('hidden');
+          if (els.loginForm) els.loginForm.classList.remove('hidden');
+          setActiveView('auth');
+          if (els.loginError) els.loginError.textContent = 'Password updated — sign in with your new password.';
+          try { els.loginPassword.focus(); } catch (_) {}
+        })
+        .catch(function (err) {
+          var msg = err.message || 'Could not reset your password.';
+          if (err.code === 'RESET_CODE_WRONG' && err.payload && err.payload.attemptsLeft != null) {
+            msg = 'Wrong code. ' + err.payload.attemptsLeft + ' tries left before you need a new one.';
+          } else if (err.code === 'RESET_CODE_LOCKED') {
+            msg = 'Too many wrong codes. Tap Resend to get a new one.';
+          }
+          setResetMsg(els.resetEnterMsg, msg, true);
+        })
+        .then(function () { setBusy(els.resetEnterSubmit, false, 'Update password'); });
+    });
+  }
+
+  // Strip non-digits + auto-focus friendliness on the reset code field.
+  if (els.resetCode) {
+    els.resetCode.addEventListener('input', function (e) {
+      var v = (e.target.value || '').replace(/\D/g, '').slice(0, 6);
+      if (v !== e.target.value) e.target.value = v;
+    });
+  }
+
+  if (els.resetResend) {
+    els.resetResend.addEventListener('click', function () {
+      var email = (els.resetEmail && els.resetEmail.value.trim().toLowerCase()) || '';
+      if (!email) return;
+      setBusy(els.resetResend, true, 'Sending…');
+      send('forgot-password', { email: email })
+        .then(function () { setResetMsg(els.resetEnterMsg, 'Sent — check your inbox (and spam).', false); })
+        .catch(function (err) { setResetMsg(els.resetEnterMsg, err.message || 'Could not resend.', true); })
+        .then(function () { setBusy(els.resetResend, false, 'Resend code'); });
+    });
+  }
+
+  if (els.resetBack) {
+    els.resetBack.addEventListener('click', function () { exitResetView(); });
+  }
 
   // "Try free — 20 min/day" — anonymous guest connect. Backend issues
   // a per-device session and short-lived proxy creds; background.js

@@ -123,6 +123,24 @@
     return this.request('/api/auth/resend-verify', { method: 'POST' });
   };
 
+  // Password reset — public (the user is logged out). forgotPassword emails a
+  // 6-digit code (always 200, never reveals whether the email exists);
+  // resetPassword verifies the code and sets the new password. Unauthenticated
+  // like the guest calls — no Authorization header is required or used.
+  Api.prototype.forgotPassword = function (email) {
+    return this.request('/api/auth/forgot', {
+      method: 'POST',
+      body: { email: email },
+    });
+  };
+
+  Api.prototype.resetPassword = function (email, code, password) {
+    return this.request('/api/auth/reset-password', {
+      method: 'POST',
+      body: { email: email, code: code, password: password },
+    });
+  };
+
   // --- Subscription --------------------------------------------------------
 
   Api.prototype.subscriptionStatus = function () {

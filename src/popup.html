@@ -351,6 +351,64 @@
       </div>
     </section>
 
+    <!-- Password reset — in-popup, code-based (no link). Step 1 emails a
+         6-digit code; step 2 takes the code + a new password. Mirrors the
+         email-pending OTP card and reuses its styles. -->
+    <section id="view-reset" class="view email-pending hidden" role="dialog" aria-labelledby="reset-title">
+      <div class="ep-card">
+        <div class="ep-icon">
+          <svg viewBox="0 0 24 24" width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+        </div>
+        <h2 id="reset-title" class="ep-title">Reset password</h2>
+
+        <!-- Step 1: request a code -->
+        <form id="reset-request-form" class="ep-form" autocomplete="off">
+          <p class="ep-sub">Enter your email and we'll send you a 6-digit reset code.</p>
+          <div class="field">
+            <span class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+              <input type="email" id="reset-email" placeholder="you@example.com" autocomplete="email" required />
+            </span>
+          </div>
+          <div id="reset-request-msg" class="ep-msg" hidden></div>
+          <button type="submit" class="btn btn-primary" id="reset-request-submit">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            <span class="btn-label">Send code</span>
+          </button>
+        </form>
+
+        <!-- Step 2: enter the code + a new password -->
+        <form id="reset-enter-form" class="ep-form hidden" autocomplete="off">
+          <p class="ep-sub">Enter the code we emailed to <strong id="reset-address">your inbox</strong> and a new password.</p>
+          <input type="text" id="reset-code" class="ep-code-input" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="000000" aria-label="6-digit reset code" required />
+          <div class="field">
+            <span class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+              <input type="password" id="reset-password" placeholder="New password" autocomplete="new-password" required minlength="8" />
+            </span>
+          </div>
+          <div class="field">
+            <span class="field-input">
+              <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg>
+              <input type="password" id="reset-confirm" placeholder="Confirm new password" autocomplete="new-password" required minlength="8" />
+            </span>
+          </div>
+          <div id="reset-enter-msg" class="ep-msg" hidden></div>
+          <button type="submit" class="btn btn-primary" id="reset-enter-submit">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            <span class="btn-label">Update password</span>
+          </button>
+        </form>
+
+        <div class="ep-actions">
+          <button type="button" class="btn btn-ghost hidden" id="reset-resend">
+            <span class="btn-label">Resend code</span>
+          </button>
+          <button type="button" class="link" id="reset-back">Back to sign in</button>
+        </div>
+      </div>
+    </section>
+
     <!-- First-run onboarding card.
          Shown once, gated by storage.onboardingSeen. The "browser-only"
          scope is the #1 source of confused uninstalls — users install

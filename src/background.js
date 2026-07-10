@@ -970,6 +970,20 @@
       });
     },
 
+    // Password reset (public — the user is logged out). forgot-password emails
+    // a 6-digit code; reset-password verifies it and sets the new password.
+    // Both are unauthenticated, so no token is attached.
+    'forgot-password': function (msg) {
+      return configureApi().then(function () {
+        return api.forgotPassword(msg && msg.email);
+      });
+    },
+    'reset-password': function (msg) {
+      return configureApi().then(function () {
+        return api.resetPassword(msg && msg.email, msg && msg.code, msg && msg.password);
+      });
+    },
+
     // User tapped "Try free" on the auth screen — flips them to the
     // main view but does NOT start the proxy. The session (and its
     // 20-min countdown) only kicks in when they tap Connect; see the
@@ -1201,6 +1215,9 @@
           error: err.message || String(err),
           code: err.code,
           status: err.status,
+          // Forward the raw JSON body so the popup can read structured
+          // fields like attemptsLeft (wrong verify/reset code) or retryAfter.
+          payload: err.payload,
         });
       });
     return true; // async response
