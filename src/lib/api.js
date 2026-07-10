@@ -18,6 +18,25 @@
     return b + p;
   }
 
+  // A network-LAYER failure: fetch() rejected before any HTTP response
+  // (TypeError "Failed to fetch" / "Load failed" / "NetworkError"). It
+  // means the request never reached the server. The control plane
+  // (securepaidvpn.com) is ALWAYS bypassed by the proxy, so on the
+  // extension this is almost always a transient proxy-config / socket
+  // race in the moments right after a proxy apply() or clear() teardown
+  // — retrying after a brief settle succeeds. Deliberately does NOT
+  // match HTTP error responses (those carry err.status) or the
+  // withTimeout "Request timed out" error (never safe to blind-retry).
+  function isNetworkError(err) {
+    if (!err || err.status != null) return false;
+    return err.name === 'TypeError' ||
+      /failed to fetch|networkerror|network error|load failed/i.test(String(err.message || ''));
+  }
+
+  function delay(ms) {
+    return new Promise(function (r) { setTimeout(r, ms); });
+  }
+
   function Api() {
     this.base = null;
     this.token = null;
@@ -41,28 +60,50 @@
       headers.Authorization = 'Bearer ' + this.token;
     }
     var url = buildUrl(this.base, path);
-    var fetchPromise = fetch(url, {
-      method: method,
-      headers: headers,
-      body: body,
-      credentials: 'omit',
-    }).then(function (res) {
-      var ct = res.headers.get('content-type') || '';
-      var parser = ct.indexOf('application/json') >= 0 ? res.json() : res.text();
-      return parser.then(function (data) {
-        if (!res.ok) {
-          var err = new Error(
-            (data && data.error) || ('HTTP ' + res.status)
-          );
-          err.status = res.status;
-          err.code = data && data.code;
-          err.payload = data;
-          throw err;
-        }
-        return data;
+    var timeoutMs = opts.timeoutMs || 20000;
+    // Retry ONLY network-layer failures (see isNetworkError). Up to 3
+    // attempts total with a short backoff so a transient proxy/socket
+    // race clears itself; the control plane is bypassed, so a genuine
+    // request never reaches a proxy. Opt out with retryOnNetworkError:
+    // false (none do today). HTTP errors/timeouts bubble up on attempt 1.
+    var maxAttempts = opts.retryOnNetworkError === false ? 1 : 3;
+
+    function once() {
+      var fetchPromise = fetch(url, {
+        method: method,
+        headers: headers,
+        body: body,
+        credentials: 'omit',
+      }).then(function (res) {
+        var ct = res.headers.get('content-type') || '';
+        var parser = ct.indexOf('application/json') >= 0 ? res.json() : res.text();
+        return parser.then(function (data) {
+          if (!res.ok) {
+            var err = new Error(
+              (data && data.error) || ('HTTP ' + res.status)
+            );
+            err.status = res.status;
+            err.code = data && data.code;
+            err.payload = data;
+            throw err;
+          }
+          return data;
+        });
       });
-    });
-    return withTimeout(fetchPromise, opts.timeoutMs || 20000);
+      return withTimeout(fetchPromise, timeoutMs);
+    }
+
+    function attempt(n) {
+      return once().catch(function (err) {
+        if (n < maxAttempts && isNetworkError(err)) {
+          console.warn('[api] network error on ' + method + ' ' + path +
+            ' (attempt ' + n + '/' + maxAttempts + '), retrying:', err && err.message);
+          return delay(300 * n).then(function () { return attempt(n + 1); });
+        }
+        throw err;
+      });
+    }
+    return attempt(1);
   };
 
   // --- Auth ----------------------------------------------------------------
