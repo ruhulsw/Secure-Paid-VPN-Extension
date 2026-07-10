@@ -3,7 +3,7 @@
   "name": "Free VPN for Chrome – SecurePaid VPN Proxy",
   "short_name": "SP VPN",
   "version": "1.0.5",
-  "description": "Free VPN for Chrome — fast US, EU, Asia servers. Unblock sites, hide your IP. 10 min/day free with a free account. Premium for unlimited.",
+  "description": "Free VPN for Chrome — fast US, EU, Asia servers. Unblock sites, hide your IP. Free 10 min/day with an account. Premium unlimited.",
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; base-uri 'self'; frame-ancestors 'none'"
   },
