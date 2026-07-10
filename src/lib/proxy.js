@@ -142,7 +142,18 @@
           BX.proxy.settings.set({
             value: {
               mode: 'fixed_servers',
-              rules: { singleProxy: { scheme: 'http', host: '127.0.0.1', port: 1 } },
+              rules: {
+                singleProxy: { scheme: 'http', host: '127.0.0.1', port: 1 },
+                // Keep the control plane (API/auth/billing) reachable even
+                // mid-teardown: if applyDirect() below fails or the SW dies
+                // between steps, the browser is left on this dead-end proxy —
+                // without this bypass EVERY request (including
+                // securepaidvpn.com) hits the dead port and fails with
+                // "Failed to fetch", stranding the popup with no way to
+                // recover. Bypassing here still tears down keep-alive sockets
+                // to the real exit-node proxy (that traffic isn't bypassed).
+                bypassList: BYPASS_DEFAULT.concat(ALWAYS_BYPASS),
+              },
             },
             scope: 'regular',
           }, function () {
