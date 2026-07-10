@@ -467,7 +467,7 @@
                 Storage.setUserSession(userSession),
                 Storage.setConnection(conn),
               ]).then(function () {
-                setBadge('2H', '#d4a04c');
+                setBadge('FREE', '#d4a04c');
                 broadcastState();
                 ensureUserHeartbeatAlarm();
                 notify(
@@ -528,7 +528,7 @@
             return Storage.setUserSession(session).then(function () {
               if (resp.disconnect) {
                 return userDisconnect('quota-exhausted').then(function () {
-                  notify("Today's 2 hours are used up",
+                  notify("Today's 10 free minutes are used up",
                     'Quota resets at midnight UTC. Subscribe for unlimited.');
                 });
               }
@@ -1253,6 +1253,13 @@
   function bootstrap() {
     if (STATE.bootstrapped) return;
     STATE.bootstrapped = true;
+    // The anonymous guest tier was removed — the free tier now requires
+    // signup + email verification (10 min/day, matching the mobile app).
+    // Wipe any guest state a previous version may have persisted so the
+    // guest / tier-chooser UI can never surface post-update.
+    Storage.setGuestModeIntent(false).catch(function () {});
+    Storage.clearGuestSession().catch(function () {});
+    try { BX.alarms.clear('guest-heartbeat'); } catch (_) {}
     ensureAlarm();
     ProxyCtl.installAuthListener();
     updateUninstallUrl();

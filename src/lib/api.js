@@ -170,99 +170,34 @@
     return this.request('/api/plans');
   };
 
-  // --- Guest free-tier (20 min/day, no account) ----------------------------
+  // --- Free tier: signup + verify → 10 min/day (matches the mobile app) ----
   //
-  // Same backend endpoints the Cross / Mac SwiftUI / mobile clients use.
-  // We don't send the Authorization header for guest calls — these
-  // routes are deliberately unauthenticated and identify the device by
-  // the deviceId payload field (a hashed per-install UUID).
-
-  Api.prototype.guestStart = function (deviceId) {
-    var url = buildUrl(this.base, '/api/guest/start');
-    return withTimeout(
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: deviceId }),
-        credentials: 'omit',
-      }).then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok) {
-            var err = new Error((data && data.error) || ('HTTP ' + res.status));
-            err.status = res.status;
-            err.code = data && data.code;
-            err.payload = data;
-            throw err;
-          }
-          return data;
-        });
-      }),
-      20000
-    );
-  };
-
-  Api.prototype.guestHeartbeat = function (deviceId, sessionToken, secondsElapsed) {
-    var url = buildUrl(this.base, '/api/guest/heartbeat');
-    return withTimeout(
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: deviceId,
-          sessionToken: sessionToken,
-          secondsElapsed: secondsElapsed,
-        }),
-        credentials: 'omit',
-      }).then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok) {
-            var err = new Error((data && data.error) || ('HTTP ' + res.status));
-            err.status = res.status;
-            err.code = data && data.code;
-            err.payload = data;
-            throw err;
-          }
-          return data;
-        });
-      }),
-      10000
-    );
-  };
-
-  Api.prototype.guestEnd = function (deviceId, sessionToken) {
-    var url = buildUrl(this.base, '/api/guest/end');
-    return withTimeout(
-      fetch(url, {
-        method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceId: deviceId, sessionToken: sessionToken }),
-        credentials: 'omit',
-      }).then(function (res) { return res.text().then(function () { return null; }); }),
-      5000
-    );
-  };
-
-  // --- Email-verified user tier (2 hours/day) -----------------------------
-  //
-  // Same response shape as guest start/heartbeat/end, but JWT-authed —
-  // the backend keys quota by userId rather than deviceId and returns
-  // a 7200s quotaSeconds (vs the anonymous 1200s).
+  // JWT-authed; the backend keys the daily quota by userId. `tier:'mobile'`
+  // gives 600s/day (10 min) and rotates the exit node via pickGuestServer,
+  // exactly like the mobile app — the response carries the same proxy
+  // descriptor + sessionToken as the premium path. The tier MUST be sent on
+  // EVERY call: start/heartbeat/end share one daily bucket keyed by
+  // (userId, tier), so a missing tier would look in the wrong bucket (the
+  // start would 200 but heartbeats/end would 401).
 
   Api.prototype.userSessionStart = function () {
-    return this.request('/api/user-session/start', { method: 'POST' });
+    return this.request('/api/user-session/start', {
+      method: 'POST',
+      body: { tier: 'mobile' },
+    });
   };
 
   Api.prototype.userSessionHeartbeat = function (sessionToken, secondsElapsed) {
     return this.request('/api/user-session/heartbeat', {
       method: 'POST',
-      body: { sessionToken: sessionToken, secondsElapsed: secondsElapsed },
+      body: { tier: 'mobile', sessionToken: sessionToken, secondsElapsed: secondsElapsed },
     });
   };
 
   Api.prototype.userSessionEnd = function (sessionToken) {
     return this.request('/api/user-session/end', {
       method: 'POST',
-      body: { sessionToken: sessionToken },
+      body: { tier: 'mobile', sessionToken: sessionToken },
     });
   };
 

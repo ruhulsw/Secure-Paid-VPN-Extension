@@ -185,10 +185,10 @@
     if (isMain && isUserTierConnected) {
       var userRemaining = computeUserRemainingSeconds();
       els.brandSub.hidden = false;
-      els.brandSub.textContent = 'Email plan · ' + formatHhMmSs(userRemaining) + ' left today';
+      els.brandSub.textContent = 'Free · ' + formatMmSs(userRemaining) + ' left today';
     } else if (isMain && isUserTierPending) {
       els.brandSub.hidden = false;
-      els.brandSub.textContent = 'Email plan · 2 hours/day available';
+      els.brandSub.textContent = 'Free · 10 minutes/day available';
     } else if (isMain && isGuest) {
       var remaining = computeGuestRemainingSeconds();
       els.brandSub.hidden = false;
@@ -1059,7 +1059,7 @@
       send('user-session-start').catch(function (err) {
         var msg = err.message || 'Could not start your session';
         if (err.code === 'USER_TIER_QUOTA_EXHAUSTED') {
-          msg = "Today's 2 hours are gone. Resets at midnight UTC, or subscribe for unlimited.";
+          msg = "Today's 10 free minutes are gone. Resets at midnight UTC, or subscribe for unlimited.";
         } else if (err.code === 'EMAIL_NOT_VERIFIED') {
           msg = 'Verify your email first.';
         } else if (err.code === 'NO_TIER_SERVER' || err.code === 'NO_TIER_PROTOCOL') {
